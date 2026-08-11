@@ -29,7 +29,6 @@
 import { ref, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useUserStore } from '@/stores/user'
-import { useAgentStore } from '@/stores/agent'
 import { authApi } from '@/apis/auth_api'
 import { message } from 'ant-design-vue'
 import { clearAutoStartAttempt } from '@/utils/oidcAutoStart'
@@ -37,7 +36,6 @@ import { clearAutoStartAttempt } from '@/utils/oidcAutoStart'
 const router = useRouter()
 const route = useRoute()
 const userStore = useUserStore()
-const agentStore = useAgentStore()
 
 // 状态
 const loading = ref(true)
@@ -92,20 +90,12 @@ const handleCallback = async () => {
 
     loading.value = false
 
-    // 延迟跳转，让用户看到成功提示
-    setTimeout(async () => {
-      // 跳转
-      if (redirectPath === '/') {
-        try {
-          await agentStore.initialize()
-          router.push('/agent')
-        } catch (err) {
-          console.error('获取智能体信息失败:', err)
-          router.push('/agent')
-        }
-      } else {
-        router.push(redirectPath)
-      }
+    // 先离开回调页，智能体和资源数据由目标页面异步加载，避免回调页长时间转圈
+    setTimeout(() => {
+      const targetPath = redirectPath === '/' ? '/agent' : redirectPath
+      router.replace(targetPath).catch((err) => {
+        console.error('登录后跳转失败:', err)
+      })
     }, 500)
   } catch (err) {
     console.error('OIDC 回调处理失败:', err)

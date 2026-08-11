@@ -32,17 +32,6 @@
               <Settings class="icon" />
             </button>
           </a-tooltip>
-          <a-tooltip :title="themeStore.isDark ? '切换到浅色模式' : '切换到深色模式'">
-            <button
-              type="button"
-              class="header-action-button"
-              aria-label="切换主题"
-              @click="toggleTheme"
-            >
-              <Sun v-if="themeStore.isDark" class="icon" />
-              <Moon v-else class="icon" />
-            </button>
-          </a-tooltip>
           <a-tooltip title="任务中心">
             <button
               type="button"
@@ -71,9 +60,8 @@
 import { ref, computed, inject, onMounted, onUnmounted } from 'vue'
 import { useInfoStore } from '@/stores/info'
 import { useUserStore } from '@/stores/user'
-import { Clock, User, ClipboardList, Settings, Sun, Moon } from 'lucide-vue-next'
+import { Clock, User, ClipboardList, Settings } from 'lucide-vue-next'
 import { useTaskerStore } from '@/stores/tasker'
-import { useThemeStore } from '@/stores/theme'
 import { storeToRefs } from 'pinia'
 import dayjs from '@/utils/time'
 
@@ -81,7 +69,6 @@ import dayjs from '@/utils/time'
 const infoStore = useInfoStore()
 const userStore = useUserStore()
 const taskerStore = useTaskerStore()
-const themeStore = useThemeStore()
 const { activeCount: activeCountRef } = storeToRefs(taskerStore)
 const { openSettingsModal } = inject('settingsModal', {})
 
@@ -124,10 +111,6 @@ const openTaskCenter = () => {
 
 const openSettings = () => {
   openSettingsModal?.(userStore.isAdmin ? 'base' : 'account')
-}
-
-const toggleTheme = () => {
-  themeStore.toggleTheme()
 }
 
 // 更新时间

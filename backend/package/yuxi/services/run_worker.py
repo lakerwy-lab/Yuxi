@@ -8,6 +8,7 @@ import os
 import time
 from dataclasses import dataclass, field
 
+from arq import cron
 from sqlalchemy import select, update
 from sqlalchemy.exc import OperationalError
 from yuxi.agents.mcp.service import ensure_builtin_mcp_servers_in_db
@@ -20,6 +21,13 @@ from yuxi.services.agent_request_queue_service import (
     recover_pending_dispatches,
 )
 from yuxi.services.chat_service import stream_agent_chat, stream_agent_resume
+from yuxi.services.dingtalk_directory_service import (
+    enqueue_due_directory_sync,
+    recover_stale_directory_sync_runs,
+    run_directory_sync_job,
+)
+from yuxi.services.dingtalk_meeting_service import cleanup_expired_booking_confirmations
+from yuxi.services.qa_pair_service import process_qa_pair_index_job, retry_pending_qa_index_jobs
 from yuxi.services.input_message_service import restore_chat_input_message
 from yuxi.services.run_queue_service import (
     append_run_stream_event,
@@ -668,7 +676,13 @@ async def _worker_shutdown(ctx):
 
 
 class WorkerSettings:
-    functions = [process_agent_run]
+    functions = [process_agent_run, run_directory_sync_job, process_qa_pair_index_job]
+    cron_jobs = [
+        cron(enqueue_due_directory_sync, minute=set(range(60))),
+        cron(recover_stale_directory_sync_runs, minute={0, 15, 30, 45}),
+        cron(retry_pending_qa_index_jobs, minute=set(range(0, 60, 5))),
+        cron(cleanup_expired_booking_confirmations, minute={5, 20, 35, 50}),
+    ]
     max_tries = 2
     retry_jobs = True
     # 单任务最长执行时间（秒），可配置：超长图谱构建/深度检索场景需调大，

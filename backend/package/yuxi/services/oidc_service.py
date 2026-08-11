@@ -18,6 +18,10 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from yuxi.repositories.user_repository import UserRepository
+from yuxi.services.dingtalk_auth_service import (
+    dingtalk_is_configured,
+    dingtalk_login_url_handler,
+)
 from yuxi.services.operation_log_service import log_operation
 from yuxi.storage.postgres.models_business import Department, User
 from yuxi.utils.auth_utils import AuthUtils
@@ -736,6 +740,13 @@ def _redirect_to_login_with_error(error_message: str) -> RedirectResponse:
 
 async def get_oidc_config_handler():
     """获取 OIDC 配置（供前端使用）"""
+    if dingtalk_is_configured():
+        return {
+            "enabled": True,
+            "provider_name": os.environ.get("DINGTALK_PROVIDER_NAME", "钉钉登录").strip()
+            or "钉钉登录",
+        }
+
     if not oidc_config.enabled or not oidc_config.is_configured():
         return {"enabled": False}
 
@@ -879,6 +890,9 @@ async def oidc_exchange_code_handler(code: str) -> dict:
 
 async def oidc_login_url_handler(redirect_path: str = "/"):
     """获取 OIDC 登录 URL"""
+    if dingtalk_is_configured():
+        return await dingtalk_login_url_handler(redirect_path)
+
     if not oidc_config.enabled or not oidc_config.is_configured():
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

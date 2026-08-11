@@ -64,4 +64,32 @@ BUILTIN_SKILLS: list[BuiltinSkillSpec] = [
         version="2026.06.05",
         mcp_dependencies=("mcp-server-chart",),
     ),
+    BuiltinSkillSpec(
+        slug="meeting-room",
+        source_dir=_SKILLS_ROOT / "meeting-room",
+        description="通过钉钉 API 查询和预订会议室；只向用户请求一次选择/确认。",
+        version="2026.08.11",
+        tool_dependencies=(
+            "search_meeting_rooms",
+            "preview_booking",
+            "confirm_booking",
+            "cancel_booking",
+            "my_bookings",
+            "ask_user_question",
+        ),
+    ),
+    BuiltinSkillSpec(
+        slug="document-analysis",
+        source_dir=_SKILLS_ROOT / "document-analysis",
+        description="复用 Yuxi OCR/文档解析链路，将 PDF、Office 和图片附件提取为 Markdown。",
+        version="2026.08.11",
+        tool_dependencies=("ocr_parse_file", "present_artifacts"),
+    ),
+    BuiltinSkillSpec(
+        slug="qa-pairs",
+        source_dir=_SKILLS_ROOT / "qa-pairs",
+        description="优先命中已发布的高频问答，无法可靠回答时转人工。",
+        version="2026.08.11",
+        tool_dependencies=("escalate_question",),
+    ),
 ]

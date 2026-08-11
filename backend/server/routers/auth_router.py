@@ -1,7 +1,7 @@
 import re
 from yuxi.utils import logger
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Request, status, UploadFile, File
+from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, Request, UploadFile, status
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field
@@ -29,6 +29,12 @@ from yuxi.services.auth_service import (
     create_cli_auth_session,
     exchange_cli_auth_token,
     get_cli_auth_session_for_user,
+)
+from yuxi.services.dingtalk_auth_service import (
+    dingtalk_callback_handler,
+    dingtalk_h5_login_handler,
+    dingtalk_login_url_handler,
+    get_dingtalk_auth_config,
 )
 from yuxi.storage.minio import upload_image_to_minio
 from yuxi.storage.minio.client import normalize_public_minio_url
@@ -141,6 +147,23 @@ class OIDCLoginResponse(BaseModel):
     role: str
     department_id: int | None = None
     department_name: str | None = None
+
+
+class DingTalkH5LoginRequest(BaseModel):
+    """钉钉 H5 免登请求。"""
+
+    auth_code: str = Field(alias="authCode", min_length=1)
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class DingTalkPublicConfig(BaseModel):
+    """前端 JSAPI 免登所需的非敏感钉钉配置。"""
+
+    corp_id: str = Field(default="", alias="corpId")
+    client_id: str = Field(default="", alias="clientId")
+
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class CLIAuthSessionCreate(BaseModel):
@@ -981,6 +1004,43 @@ async def impersonate_user(
 # =============================================================================
 # === OIDC 认证分组 ===
 # =============================================================================
+
+
+@auth.get("/dingtalk/pc/start")
+async def dingtalk_pc_login_start(redirect_path: str = Query(default="/")):
+    """生成钉钉 PC 扫码登录地址并跳转。"""
+    login_data = await dingtalk_login_url_handler(redirect_path)
+    return RedirectResponse(url=login_data["login_url"], status_code=302)
+
+
+@auth.get("/dingtalk/pc/callback", response_class=RedirectResponse)
+async def dingtalk_pc_login_callback(
+    request: Request,
+    authCode: str = Query(default=""),
+    state: str = Query(default=""),
+    db: AsyncSession = Depends(get_db),
+):
+    """处理钉钉 PC 扫码回调。"""
+    if not authCode or not state:
+        raise HTTPException(status_code=400, detail="缺少 authCode 或 state")
+    return await dingtalk_callback_handler(authCode, state, db, request)
+
+
+@auth.post("/dingtalk/h5", response_model=OIDCLoginResponse)
+async def dingtalk_h5_login(
+    payload: DingTalkH5LoginRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """处理钉钉 H5 免登。"""
+    return await dingtalk_h5_login_handler(payload.auth_code, db, request)
+
+
+@auth.get("/public-config", response_model=DingTalkPublicConfig)
+async def get_dingtalk_public_config() -> DingTalkPublicConfig:
+    """返回钉钉 H5 JSAPI 免登所需的非敏感配置。"""
+    config = get_dingtalk_auth_config()
+    return DingTalkPublicConfig(corpId=config.corp_id, clientId=config.client_id)
 
 
 @auth.get("/oidc/config", response_model=OIDCConfigResponse)

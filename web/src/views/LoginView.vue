@@ -294,6 +294,11 @@ import {
   AlertCircle as ExclamationCircleIcon
 } from 'lucide-vue-next'
 import { tryAutoStartOIDC, sanitizeRedirect } from '@/utils/oidcAutoStart'
+import {
+  clearDingTalkLogoutRequest,
+  isDingTalkLogoutRequested,
+  isInDingTalk
+} from '@/utils/dingtalkAuth'
 import { MIN_PASSWORD_LENGTH } from '@/utils/passwordValidation'
 
 const router = useRouter()
@@ -336,7 +341,7 @@ const showAgreementConsent = computed(() => {
 const isFirstRun = ref(false)
 const loading = ref(false)
 const errorMessage = ref('')
-const agreementAccepted = ref(false)
+const agreementAccepted = ref(true)
 const serverStatus = ref('loading')
 const serverError = ref('')
 const healthChecking = ref(false)
@@ -639,6 +644,11 @@ onMounted(async () => {
     errorMessage.value = String(route.query.oidc_error)
   }
 
+  const skipAutomaticLogin = isDingTalkLogoutRequested()
+  if (skipAutomaticLogin) {
+    clearDingTalkLogoutRequest()
+  }
+
   // 首先检查服务器健康状态
   await checkServerHealth()
 
@@ -650,9 +660,28 @@ onMounted(async () => {
     return
   }
 
+  // 直接访问 /login 时也支持钉钉 H5 免登，避免只依赖路由守卫
+  if (isInDingTalk() && !skipAutomaticLogin) {
+    try {
+      loading.value = true
+      await userStore.loginWithDingTalk()
+      const redirectPath = sanitizeRedirect(
+        sessionStorage.getItem('redirect') || route.query.redirect
+      )
+      sessionStorage.removeItem('redirect')
+      await router.replace(redirectPath === '/' || redirectPath === '/login' ? '/agent' : redirectPath)
+      return
+    } catch (error) {
+      console.error('钉钉 H5 免登失败:', error)
+      errorMessage.value = error.message || '钉钉免登失败，请重试'
+    } finally {
+      loading.value = false
+    }
+  }
+
   // 检查 OIDC 配置完成后，尝试自动触发 OIDC 登录（跨系统跳转场景）
   const config = await checkOIDCConfig()
-  if (config && config.enabled) {
+  if (config && config.enabled && !skipAutomaticLogin) {
     const autoStarted = await tryAutoStartOIDC(async () => await authApi.getOIDCLoginUrl(), config)
     // 如果已发起 OIDC 跳转，页面会被重定向，不需要继续
     if (autoStarted) return

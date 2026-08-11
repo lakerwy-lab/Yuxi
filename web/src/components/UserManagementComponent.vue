@@ -1,5 +1,51 @@
 <template>
   <div class="user-management">
+    <section v-if="userStore.isSuperAdmin" class="directory-sync-panel">
+      <div class="directory-sync-main">
+        <div class="directory-sync-icon" :class="`is-${directorySyncTone}`">
+          <CloudSync :size="19" />
+        </div>
+        <div class="directory-sync-copy">
+          <div class="directory-sync-title">钉钉通讯录</div>
+          <div class="directory-sync-subtitle">
+            <template v-if="directorySync.status?.started_at">
+              最近同步：{{ formatTime(directorySync.status.completed_at || directorySync.status.started_at) }}
+            </template>
+            <template v-else-if="directorySync.configured === false">尚未完成钉钉应用配置</template>
+            <template v-else>尚无同步记录</template>
+          </div>
+        </div>
+      </div>
+
+      <div class="directory-sync-summary">
+        <span class="directory-sync-state" :class="`is-${directorySyncTone}`">
+          <CircleCheck v-if="directorySyncTone === 'success'" :size="15" />
+          <CircleAlert v-else-if="directorySyncTone === 'danger'" :size="15" />
+          <Clock3 v-else :size="15" />
+          {{ directorySyncStatusText }}
+        </span>
+        <span class="directory-sync-count"><Building2 :size="15" />{{ directorySync.status?.department_count || 0 }} 个部门</span>
+        <span class="directory-sync-count"><UsersRound :size="15" />{{ directorySync.status?.user_count || 0 }} 名成员</span>
+        <a-button
+          class="lucide-icon-btn"
+          :loading="directorySync.starting || directorySyncActive"
+          :disabled="directorySync.configured !== true"
+          @click="startDirectorySync"
+        >
+          <template #icon><RefreshCw :size="15" /></template>
+          同步通讯录
+        </a-button>
+      </div>
+
+      <a-alert
+        v-if="directorySync.status?.error_message || directorySync.localError"
+        class="directory-sync-error"
+        type="error"
+        :message="directorySync.status?.error_message || directorySync.localError"
+        show-icon
+      />
+    </section>
+
     <!-- 头部区域 -->
     <div class="header-section">
       <div class="header-content">
@@ -252,11 +298,17 @@
 </template>
 
 <script setup>
-import { reactive, onMounted, watch, computed } from 'vue'
+import { reactive, onBeforeUnmount, onMounted, watch, computed } from 'vue'
 import { message, Modal } from 'ant-design-vue'
 import { useUserStore } from '@/stores/user'
 import { departmentApi } from '@/apis'
+import { dingtalkApi } from '@/apis/dingtalk_api'
 import {
+  Building2,
+  CircleAlert,
+  CircleCheck,
+  Clock3,
+  CloudSync,
   Plus,
   SquarePen,
   Trash2,
@@ -264,7 +316,8 @@ import {
   UserLock,
   UserStar,
   RefreshCw,
-  Search
+  Search,
+  UsersRound
 } from 'lucide-vue-next'
 import { formatDateTime } from '@/utils/time'
 import { isPasswordLongEnough, MIN_PASSWORD_LENGTH } from '@/utils/passwordValidation'
@@ -273,6 +326,109 @@ import FallbackAvatar from '@/components/common/FallbackAvatar.vue'
 import InfoCard from '@/components/shared/InfoCard.vue'
 
 const userStore = useUserStore()
+const DIRECTORY_SYNC_POLL_MS = 5000
+const DIRECTORY_SYNC_TIMEOUT_MS = 30 * 60 * 1000
+
+const directorySync = reactive({
+  configured: null,
+  intervalSeconds: 0,
+  starting: false,
+  status: null,
+  localError: '',
+  pollTimer: null,
+  pollStartedAt: 0
+})
+
+const directorySyncActive = computed(() =>
+  ['queued', 'running'].includes(directorySync.status?.status)
+)
+
+const directorySyncTone = computed(() => {
+  if (directorySync.configured === false || directorySync.status?.status === 'failed') return 'danger'
+  if (directorySync.status?.status === 'completed') return 'success'
+  return 'pending'
+})
+
+const directorySyncStatusText = computed(() => {
+  if (directorySync.configured === false) return '未配置'
+  const labels = {
+    queued: '等待同步',
+    running: '同步中',
+    completed: '同步成功',
+    failed: '同步失败'
+  }
+  return labels[directorySync.status?.status] || '等待首次同步'
+})
+
+const stopDirectorySyncPolling = () => {
+  if (directorySync.pollTimer) window.clearTimeout(directorySync.pollTimer)
+  directorySync.pollTimer = null
+}
+
+const pollDirectorySync = async () => {
+  stopDirectorySyncPolling()
+  if (!directorySyncActive.value) return
+  if (Date.now() - directorySync.pollStartedAt >= DIRECTORY_SYNC_TIMEOUT_MS) {
+    directorySync.localError = '同步超过 30 分钟仍未完成，请查看 worker 日志后重试'
+    return
+  }
+  directorySync.pollTimer = window.setTimeout(async () => {
+    await loadDirectorySyncStatus(true)
+    await pollDirectorySync()
+  }, DIRECTORY_SYNC_POLL_MS)
+}
+
+const loadDirectorySyncStatus = async (silent = false) => {
+  try {
+    directorySync.status = await dingtalkApi.getDirectorySyncStatus()
+    directorySync.localError = ''
+    if (directorySync.status?.status === 'completed' && silent) {
+      await Promise.all([fetchUsers(), fetchDepartments()])
+    }
+  } catch (error) {
+    if (error?.response?.status !== 404 && !silent) {
+      directorySync.localError = error.message || '读取通讯录同步状态失败'
+    }
+  }
+}
+
+const loadDirectorySync = async () => {
+  try {
+    const config = await dingtalkApi.getDirectorySyncConfig()
+    directorySync.configured = config.configured === true
+    directorySync.intervalSeconds = Number(config.interval_seconds || 0)
+    if (directorySync.configured) await loadDirectorySyncStatus()
+    if (directorySyncActive.value) {
+      directorySync.pollStartedAt = Date.now()
+      await pollDirectorySync()
+    }
+  } catch (error) {
+    directorySync.localError = error.message || '读取钉钉通讯录配置失败'
+  }
+}
+
+const startDirectorySync = async () => {
+  if (directorySync.starting || directorySyncActive.value) return
+  directorySync.starting = true
+  directorySync.localError = ''
+  try {
+    const result = await dingtalkApi.startDirectorySync()
+    directorySync.status = {
+      ...(directorySync.status || {}),
+      id: result.run_id,
+      status: result.status || 'queued',
+      error_message: null
+    }
+    directorySync.pollStartedAt = Date.now()
+    message.success('通讯录同步任务已提交')
+    await pollDirectorySync()
+  } catch (error) {
+    directorySync.localError = error.message || '通讯录同步任务提交失败'
+    message.error(directorySync.localError)
+  } finally {
+    directorySync.starting = false
+  }
+}
 
 // 用户管理相关状态
 const userManagement = reactive({
@@ -676,13 +832,87 @@ const getRoleClass = (role) => {
 
 // 在组件挂载时获取用户列表
 onMounted(async () => {
-  await fetchUsers()
-  await fetchDepartments()
+  await Promise.all([fetchUsers(), fetchDepartments(), loadDirectorySync()])
 })
+
+onBeforeUnmount(stopDirectorySyncPolling)
 </script>
 
 <style lang="less" scoped>
 .user-management {
+  .directory-sync-panel {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px 24px;
+    padding: 16px 18px;
+    margin-bottom: 18px;
+    border: 1px solid var(--gray-200);
+    border-radius: 12px;
+    background: linear-gradient(120deg, var(--gray-25), var(--gray-0));
+  }
+
+  .directory-sync-main,
+  .directory-sync-summary,
+  .directory-sync-state,
+  .directory-sync-count {
+    display: flex;
+    align-items: center;
+  }
+
+  .directory-sync-main {
+    min-width: 260px;
+    gap: 12px;
+  }
+
+  .directory-sync-icon {
+    display: grid;
+    width: 38px;
+    height: 38px;
+    flex: 0 0 38px;
+    place-items: center;
+    border-radius: 11px;
+    color: var(--main-color);
+    background: var(--main-50);
+
+    &.is-success { color: var(--color-success-500); background: var(--color-success-50); }
+    &.is-danger { color: var(--color-error-500); background: var(--color-error-50); }
+  }
+
+  .directory-sync-title {
+    color: var(--gray-900);
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  .directory-sync-subtitle {
+    margin-top: 3px;
+    color: var(--gray-500);
+    font-size: 12px;
+  }
+
+  .directory-sync-summary {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 10px 16px;
+    color: var(--gray-600);
+    font-size: 13px;
+  }
+
+  .directory-sync-state,
+  .directory-sync-count {
+    gap: 5px;
+    white-space: nowrap;
+  }
+
+  .directory-sync-state.is-success { color: var(--color-success-500); }
+  .directory-sync-state.is-danger { color: var(--color-error-500); }
+
+  .directory-sync-error {
+    width: 100%;
+  }
+
   .header-section {
     display: flex;
     justify-content: space-between;

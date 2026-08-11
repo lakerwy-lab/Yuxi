@@ -11,6 +11,9 @@ from sqlalchemy.orm import declarative_base
 from yuxi.storage.postgres.models_business import AGENT_RUN_TERMINAL_STATUSES
 from yuxi.storage.postgres.models_business import Base as BusinessBase
 from yuxi.storage.postgres.models_knowledge import Base as KnowledgeBase
+from yuxi.storage.postgres import models_dingtalk as _models_dingtalk  # noqa: F401
+from yuxi.storage.postgres import models_meeting as _models_meeting  # noqa: F401
+from yuxi.storage.postgres import models_qa as _models_qa  # noqa: F401
 from yuxi.utils import logger
 from yuxi.utils.singleton import SingletonMeta
 
@@ -487,6 +490,30 @@ class PostgresManager(metaclass=SingletonMeta):
         """确保业务 schema 包含后续新增字段（运行时 schema 演进）。"""
         self._check_initialized()
         stmts = [
+            "ALTER TABLE IF EXISTS departments ADD COLUMN IF NOT EXISTS dingtalk_corp_id VARCHAR(128)",
+            "ALTER TABLE IF EXISTS departments ADD COLUMN IF NOT EXISTS dingtalk_dept_id VARCHAR(128)",
+            "ALTER TABLE IF EXISTS departments ADD COLUMN IF NOT EXISTS dingtalk_parent_dept_id VARCHAR(128)",
+            "ALTER TABLE IF EXISTS departments ADD COLUMN IF NOT EXISTS dingtalk_dept_path VARCHAR(1024)",
+            "ALTER TABLE IF EXISTS departments ADD COLUMN IF NOT EXISTS dingtalk_active BOOLEAN NOT NULL DEFAULT TRUE",
+            "ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS dingtalk_corp_id VARCHAR(128)",
+            "ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS dingtalk_union_id VARCHAR(128)",
+            "ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS dingtalk_user_id VARCHAR(128)",
+            "ALTER TABLE IF EXISTS qa_pairs ADD COLUMN IF NOT EXISTS deleted_at VARCHAR(64)",
+            (
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_departments_dingtalk_corp_dept "
+                "ON departments(dingtalk_corp_id, dingtalk_dept_id) "
+                "WHERE dingtalk_corp_id IS NOT NULL AND dingtalk_dept_id IS NOT NULL"
+            ),
+            (
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_users_dingtalk_corp_union "
+                "ON users(dingtalk_corp_id, dingtalk_union_id) "
+                "WHERE dingtalk_corp_id IS NOT NULL AND dingtalk_union_id IS NOT NULL"
+            ),
+            (
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_users_dingtalk_corp_user "
+                "ON users(dingtalk_corp_id, dingtalk_user_id) "
+                "WHERE dingtalk_corp_id IS NOT NULL AND dingtalk_user_id IS NOT NULL"
+            ),
             "ALTER TABLE IF EXISTS skills ADD COLUMN IF NOT EXISTS tool_dependencies JSONB DEFAULT '[]'::jsonb",
             "ALTER TABLE IF EXISTS skills ADD COLUMN IF NOT EXISTS mcp_dependencies JSONB DEFAULT '[]'::jsonb",
             "ALTER TABLE IF EXISTS skills ADD COLUMN IF NOT EXISTS skill_dependencies JSONB DEFAULT '[]'::jsonb",

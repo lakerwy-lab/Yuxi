@@ -463,8 +463,17 @@ def _replace_skill_target(
             validate(temp_target)
         if target_dir.exists():
             trash_dir = target_dir.with_name(f".{target_dir.name}.bak-{uuid.uuid4().hex[:8]}")
-            target_dir.rename(trash_dir)
-        temp_target.rename(target_dir)
+            try:
+                target_dir.rename(trash_dir)
+            except FileNotFoundError:
+                # API 与 worker 同时启动时，另一进程可能刚好先完成了目录替换。
+                trash_dir = None
+        try:
+            temp_target.rename(target_dir)
+        except FileExistsError:
+            if not target_dir.exists() or not _dirs_equal(temp_target, target_dir):
+                raise
+            shutil.rmtree(temp_target, ignore_errors=True)
     except Exception:
         shutil.rmtree(temp_target, ignore_errors=True)
         if trash_dir and trash_dir.exists() and not target_dir.exists():

@@ -24,6 +24,7 @@ class KnowledgeChunkRepository:
         "start_token_pos",
         "end_token_pos",
         "graph_indexed",
+        "graph_structure_indexed",
         "graph_extraction_details",
         "ent_ids",
         "tags",

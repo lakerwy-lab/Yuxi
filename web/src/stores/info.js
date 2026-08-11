@@ -2,6 +2,9 @@ import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
 import { brandApi } from '@/apis/system_api'
 
+const PRODUCT_NAME = '智能助手'
+const PRODUCT_ICON = '/favicon.svg'
+
 export const useInfoStore = defineStore('info', () => {
   // 状态
   const infoConfig = ref({})
@@ -10,25 +13,21 @@ export const useInfoStore = defineStore('info', () => {
   const debugMode = ref(false)
 
   // 计算属性 - 组织信息
-  const organization = computed(
-    () =>
-      infoConfig.value.organization || {
-        name: '',
-        logo: '',
-        avatar: ''
-      }
-  )
+  const organization = computed(() => ({
+    ...(infoConfig.value.organization || {}),
+    name: PRODUCT_NAME,
+    logo: PRODUCT_ICON,
+    avatar: PRODUCT_ICON
+  }))
 
   // 计算属性 - 品牌信息
-  const branding = computed(
-    () =>
-      infoConfig.value.branding || {
-        name: '',
-        title: '',
-        subtitle: '',
-        subtitles: []
-      }
-  )
+  const branding = computed(() => ({
+    title: '',
+    subtitle: '',
+    subtitles: [],
+    ...(infoConfig.value.branding || {}),
+    name: PRODUCT_NAME
+  }))
 
   // 计算属性 - 页脚信息
   const footer = computed(() => ({

@@ -196,6 +196,10 @@
             <FileTable ref="fileTableRef" :readonly="!canManageDatabase" />
           </div>
 
+          <div v-if="isMilvus && activeTab === 'qa-pairs'" class="tab-panel">
+            <QAPairsPanel v-if="kbId" :kb-id="kbId" :readonly="!canManageDatabase" />
+          </div>
+
           <div v-show="activeTab === 'query'" class="tab-panel query-config-panel">
             <QuerySection ref="querySectionRef" :visible="true" @toggle-visible="() => {}" />
           </div>
@@ -381,6 +385,7 @@ import {
   FolderPlus,
   Hash,
   LoaderCircle,
+  ListChecks,
   Map as MapIcon,
   Network,
   Pencil,
@@ -392,6 +397,7 @@ import FileTable from '@/components/FileTable.vue'
 import FileDetailModal from '@/components/FileDetailModal.vue'
 import FileUploadModal from '@/components/FileUploadModal.vue'
 import FileSearchModal from '@/components/modals/FileSearchModal.vue'
+import QAPairsPanel from '@/components/QAPairsPanel.vue'
 import KnowledgeGraphSection from '@/components/KnowledgeGraphSection.vue'
 import QuerySection from '@/components/QuerySection.vue'
 import MindMapSection from '@/components/MindMapSection.vue'
@@ -450,6 +456,7 @@ const tabs = computed(() => {
   if (isMilvus.value) {
     return [
       { key: 'filetable', label: '文件管理', icon: FileText },
+      { key: 'qa-pairs', label: '问答对', icon: ListChecks },
       { key: 'query', label: '检索测试', icon: Search },
       { key: 'graph', label: '知识图谱', icon: Network },
       { key: 'mindmap', label: '知识导图', icon: MapIcon },

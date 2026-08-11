@@ -114,6 +114,7 @@ class KnowledgeFileRepository:
         filters = [KnowledgeFile.kb_id == kb_id]
         if files_only:
             filters.append(KnowledgeFile.is_folder.is_(False))
+            filters.append(or_(KnowledgeFile.file_type.is_(None), KnowledgeFile.file_type != "qa_pair"))
         if statuses is not None:
             filters.append(KnowledgeFile.status.in_(statuses))
 
@@ -155,7 +156,11 @@ class KnowledgeFileRepository:
         async with pg_manager.get_async_session_context() as session:
             result = await session.execute(
                 select(KnowledgeFile)
-                .where(KnowledgeFile.kb_id == kb_id, self._parent_condition(parent_id))
+                .where(
+                    KnowledgeFile.kb_id == kb_id,
+                    self._parent_condition(parent_id),
+                    or_(KnowledgeFile.file_type.is_(None), KnowledgeFile.file_type != "qa_pair"),
+                )
                 .order_by(KnowledgeFile.is_folder.desc(), func.lower(KnowledgeFile.filename).asc())
             )
             return list(result.scalars().all())
@@ -197,6 +202,7 @@ class KnowledgeFileRepository:
                 .where(
                     KnowledgeFile.kb_id == kb_id,
                     KnowledgeFile.is_folder.is_(False),
+                    or_(KnowledgeFile.file_type.is_(None), KnowledgeFile.file_type != "qa_pair"),
                     func.lower(KnowledgeFile.filename).like(f"%{escaped_pattern}%", escape="\\"),
                 )
                 .order_by(KnowledgeFile.file_id.asc())
@@ -318,7 +324,10 @@ class KnowledgeFileRepository:
         recursive: bool,
         files_only: bool,
     ) -> list:
-        filters = [KnowledgeFile.kb_id == kb_id]
+        filters = [
+            KnowledgeFile.kb_id == kb_id,
+            or_(KnowledgeFile.file_type.is_(None), KnowledgeFile.file_type != "qa_pair"),
+        ]
         if not recursive:
             filters.append(self._parent_condition(parent_id))
         if files_only:
@@ -343,7 +352,12 @@ class KnowledgeFileRepository:
     ) -> tuple[list[Any], int]:
         offset = (page - 1) * page_size
         parent_condition = self._parent_condition(parent_id)
-        base_filters = [KnowledgeFile.kb_id == kb_id, parent_condition, KnowledgeFile.filename.is_not(None)]
+        base_filters = [
+            KnowledgeFile.kb_id == kb_id,
+            parent_condition,
+            KnowledgeFile.filename.is_not(None),
+            or_(KnowledgeFile.file_type.is_(None), KnowledgeFile.file_type != "qa_pair"),
+        ]
         if path_prefix:
             base_filters.append(KnowledgeFile.filename.like(self._like_prefix(path_prefix), escape="\\"))
 
@@ -492,6 +506,7 @@ class KnowledgeFileRepository:
 
     async def get_kb_file_stats(self, kb_id: str) -> dict[str, int]:
         non_folder = KnowledgeFile.is_folder.is_(False)
+        visible_file = or_(KnowledgeFile.file_type.is_(None), KnowledgeFile.file_type != "qa_pair")
         async with pg_manager.get_async_session_context() as session:
             result = await session.execute(
                 select(
@@ -522,7 +537,7 @@ class KnowledgeFileRepository:
                             else_=0,
                         )
                     ).label("processing_count"),
-                ).where(KnowledgeFile.kb_id == kb_id)
+                ).where(KnowledgeFile.kb_id == kb_id, visible_file)
             )
             row = result.one()
 

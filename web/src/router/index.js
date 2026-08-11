@@ -1,9 +1,9 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import AppLayout from '@/layouts/AppLayout.vue'
-import BlankLayout from '@/layouts/BlankLayout.vue'
 import { useUserStore } from '@/stores/user'
 import { useAgentStore } from '@/stores/agent'
 import { sanitizeRedirect } from '@/utils/oidcAutoStart'
+import { isDingTalkLogoutRequested, isInDingTalk } from '@/utils/dingtalkAuth'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -11,15 +11,7 @@ const router = createRouter({
     {
       path: '/',
       name: 'main',
-      component: BlankLayout,
-      children: [
-        {
-          path: '',
-          name: 'Home',
-          component: () => import('../views/HomeView.vue'),
-          meta: { keepAlive: true, requiresAuth: false }
-        }
-      ]
+      redirect: '/agent'
     },
     {
       path: '/login',
@@ -85,6 +77,19 @@ const router = createRouter({
       ]
     },
     {
+      path: '/migration',
+      name: 'migration',
+      component: AppLayout,
+      children: [
+        {
+          path: '',
+          name: 'MigrationComp',
+          component: () => import('../views/MigrationAdminView.vue'),
+          meta: { keepAlive: false, requiresAuth: true, requiresSuperAdmin: true }
+        }
+      ]
+    },
+    {
       path: '/agent-manage',
       name: 'agent-manage',
       component: AppLayout,
@@ -93,7 +98,7 @@ const router = createRouter({
           path: '',
           name: 'AgentManageComp',
           component: () => import('../views/AgentManageView.vue'),
-          meta: { keepAlive: false, requiresAuth: true }
+          meta: { keepAlive: false, requiresAuth: true, requiresAdmin: true }
         }
       ]
     },
@@ -108,7 +113,8 @@ const router = createRouter({
           component: () => import('../views/ExtensionsView.vue'),
           meta: {
             keepAlive: false,
-            requiresAuth: true
+            requiresAuth: true,
+            requiresAdmin: true
           },
           children: [
             {
@@ -177,8 +183,33 @@ router.beforeEach(async (to) => {
   const isAdmin = userStore.isAdmin
   const isSuperAdmin = userStore.isSuperAdmin
 
+  // 钉钉入口即使配置到了 /login，也先完成 H5 免登再进入聊天首页。
+  if (to.path === '/login' && isInDingTalk() && !isLoggedIn && !isDingTalkLogoutRequested()) {
+    const isFirstRun = await userStore.checkFirstRun()
+    if (!isFirstRun) {
+      try {
+        await userStore.loginWithDingTalk()
+        const redirectPath = sanitizeRedirect(to.query.redirect)
+        sessionStorage.removeItem('redirect')
+        return redirectPath === '/' || redirectPath === '/login' ? '/agent' : redirectPath
+      } catch (error) {
+        console.error('钉钉登录页入口免登失败:', error)
+      }
+    }
+  }
+
   // 如果路由需要认证但用户未登录
   if (requiresAuth && !isLoggedIn) {
+    // 钉钉网页应用优先走 H5 JSAPI 免登，不进入 PC OAuth 登录页
+    if (isInDingTalk()) {
+      try {
+        await userStore.loginWithDingTalk()
+        return true
+      } catch (error) {
+        console.error('钉钉 H5 免登失败:', error)
+      }
+    }
+
     // 保存尝试访问的路径，登录后跳转
     sessionStorage.setItem('redirect', to.fullPath)
     return '/login'

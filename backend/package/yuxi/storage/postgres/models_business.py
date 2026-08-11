@@ -14,6 +14,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.declarative import declarative_base
@@ -38,16 +39,28 @@ class Department(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(50), nullable=False, unique=True, index=True)
     description = Column(String(255), nullable=True)
+    dingtalk_corp_id = Column(String(128), nullable=True, index=True)
+    dingtalk_dept_id = Column(String(128), nullable=True)
+    dingtalk_parent_dept_id = Column(String(128), nullable=True)
+    dingtalk_dept_path = Column(String(1024), nullable=True)
+    dingtalk_active = Column(Boolean, nullable=False, default=True, index=True)
     created_at = Column(DateTime, default=utc_now_naive)
 
     # 关联关系
     users = relationship("User", back_populates="department", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        UniqueConstraint("dingtalk_corp_id", "dingtalk_dept_id", name="uq_departments_dingtalk_corp_dept"),
+    )
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "name": self.name,
             "description": self.description,
+            "dingtalk_dept_id": self.dingtalk_dept_id,
+            "dingtalk_parent_dept_id": self.dingtalk_parent_dept_id,
+            "dingtalk_dept_path": self.dingtalk_dept_path,
             "created_at": format_utc_datetime(self.created_at),
         }
 
@@ -61,6 +74,9 @@ class User(Base):
     username = Column(String, nullable=False, unique=True, index=True)  # 显示名称
     uid = Column(String, nullable=False, unique=True, index=True)  # 登录标识
     phone_number = Column(String, nullable=True, unique=True, index=True)  # 手机号
+    dingtalk_corp_id = Column(String(128), nullable=True, index=True)  # 钉钉企业标识
+    dingtalk_union_id = Column(String(128), nullable=True)  # 企业内稳定身份标识
+    dingtalk_user_id = Column(String(128), nullable=True)  # 企业内用户 ID
     avatar = Column(String, nullable=True)  # 头像URL
     password_hash = Column(String, nullable=False)
     role = Column(String, nullable=False, default="user")  # 角色: superadmin, admin, user
@@ -89,12 +105,20 @@ class User(Base):
     agent_env = relationship("AgentEnv", back_populates="user", cascade="all, delete-orphan", uselist=False)
     user_config = relationship("UserConfig", back_populates="user", cascade="all, delete-orphan", uselist=False)
 
+    __table_args__ = (
+        UniqueConstraint("dingtalk_corp_id", "dingtalk_union_id", name="uq_users_dingtalk_corp_union"),
+        UniqueConstraint("dingtalk_corp_id", "dingtalk_user_id", name="uq_users_dingtalk_corp_user"),
+    )
+
     def to_dict(self, include_password: bool = False) -> dict[str, Any]:
         result = {
             "id": self.id,
             "username": self.username,
             "uid": self.uid,
             "phone_number": self.phone_number,
+            "dingtalk_corp_id": self.dingtalk_corp_id,
+            "dingtalk_union_id": self.dingtalk_union_id,
+            "dingtalk_user_id": self.dingtalk_user_id,
             "avatar": normalize_public_minio_url(self.avatar),
             "role": self.role,
             "department_id": self.department_id,

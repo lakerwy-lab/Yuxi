@@ -33,20 +33,6 @@
             </div>
           </a-menu-item>
           <a-menu-divider />
-          <a-menu-item key="docs" @click="openDocs">
-            <template #icon><BookOpen :size="16" /></template>
-            <span class="menu-text">文档中心</span>
-          </a-menu-item>
-          <a-menu-item key="theme" @click="toggleTheme">
-            <template #icon>
-              <Sun v-if="themeStore.isDark" :size="16" />
-              <Moon v-else :size="16" />
-            </template>
-            <span class="menu-text">{{
-              themeStore.isDark ? '切换到浅色模式' : '切换到深色模式'
-            }}</span>
-          </a-menu-item>
-          <a-menu-divider />
           <a-menu-item v-if="userStore.isSuperAdmin" key="debug" @click="showDebug = true">
             <template #icon><Terminal :size="16" /></template>
             <span class="menu-text">调试面板（非生产环境）</span>
@@ -75,14 +61,13 @@ import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import DebugComponent from '@/components/DebugComponent.vue'
 import { message } from 'ant-design-vue'
-import { BookOpen, Sun, Moon, LogOut, Settings, Terminal } from 'lucide-vue-next'
-import { useThemeStore } from '@/stores/theme'
+import { LogOut, Settings, Terminal } from 'lucide-vue-next'
 import { generatePixelAvatar } from '@/utils/pixelAvatar'
 import FallbackAvatar from '@/components/common/FallbackAvatar.vue'
+import { isInDingTalk, markDingTalkLogout } from '@/utils/dingtalkAuth'
 
 const router = useRouter()
 const userStore = useUserStore()
-const themeStore = useThemeStore()
 const slots = useSlots()
 
 // 调试面板状态
@@ -120,6 +105,9 @@ const userRoleText = computed(() => {
 
 // 退出登录
 const logout = () => {
+  if (isInDingTalk()) {
+    markDingTalkLogout()
+  }
   userStore.logout()
   message.success('已退出登录')
   // 跳转到首页
@@ -129,14 +117,6 @@ const logout = () => {
 // 前往登录页
 const goToLogin = () => {
   router.push('/login')
-}
-
-const openDocs = () => {
-  window.open('https://xerrors.github.io/Yuxi/', '_blank', 'noopener,noreferrer')
-}
-
-const toggleTheme = () => {
-  themeStore.toggleTheme()
 }
 
 // 前往设置页

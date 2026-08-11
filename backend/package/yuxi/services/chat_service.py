@@ -935,6 +935,47 @@ async def stream_agent_chat(
         # 智能体流式执行期间不访问业务数据库，先结束预处理事务并归还连接池。
         await db.commit()
 
+        # 已发布问答对命中时直接返回标准答案，避免再次调用 LLM 改写原文。
+        try:
+            from yuxi.services.qa_pair_service import find_exact_answer
+
+            qa_hit = await find_exact_answer(db, input_context.get("knowledges"), query)
+        except Exception:
+            logger.exception("QA exact-match gate failed; continue with agent stream")
+            qa_hit = None
+        if qa_hit:
+            qa_metadata = {
+                "source": "qa_pair",
+                "qa_pair_id": qa_hit["qa_pair_id"],
+                "kb_id": qa_hit["kb_id"],
+                "score": qa_hit["score"],
+                "revision": qa_hit["revision"],
+            }
+            await conv_repo.add_message_by_thread_id(
+                thread_id=thread_id,
+                role="assistant",
+                content=qa_hit["answer"],
+                message_type="text",
+                extra_metadata=qa_metadata,
+                run_id=meta.get("run_id"),
+                request_id=meta.get("request_id"),
+            )
+            meta.update(
+                {
+                    "qa_pair_id": qa_hit["qa_pair_id"],
+                    "qa_score": qa_hit["score"],
+                    "time_cost": asyncio.get_event_loop().time() - start_time,
+                }
+            )
+            yield make_chunk(
+                content=qa_hit["answer"],
+                status="loading",
+                stream_event={"type": "qa_exact", **qa_metadata},
+                meta=meta,
+            )
+            yield make_chunk(status="finished", meta=meta)
+            return
+
         # 先构建 langgraph_config
         langgraph_config = {"configurable": {"thread_id": thread_id, "uid": uid}}
 

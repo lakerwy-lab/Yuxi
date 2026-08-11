@@ -1,43 +1,43 @@
 /* color palette from <https://github.com/vuejs/theme> */
 /* https://material-foundation.github.io/material-theme-builder/ */
 :root {
-  --main-1000: #01151f;
-  --main-900: #023944;
-  --main-800: #035065;
-  --main-700: #046a82;
-  --main-600: #24839a;
-  --main-500: #3996ae;
-  --main-400: #5faec2;
-  --main-300: #82c3d6;
-  --main-200: #a3d8e8;
-  --main-100: #c4eaf5;
-  --main-50: #e1f6fb;
-  --main-40: #eaf3f5;
-  --main-30: #f7fbfd;
-  --main-20: #f6f9fa;
-  --main-10: #fafcfd;
-  --main-5: #fcfefe;
-  --main-1: #fefefe;
+  --main-1000: #10231f;
+  --main-900: #144a3d;
+  --main-800: #0b5f4e;
+  --main-700: #0b806a;
+  --main-600: #1e8f78;
+  --main-500: #3aa084;
+  --main-400: #5fb59b;
+  --main-300: #82c7b1;
+  --main-200: #a5d9c8;
+  --main-100: #c6eade;
+  --main-50: #e4f5ef;
+  --main-40: #e8f3ef;
+  --main-30: #f0f9f5;
+  --main-20: #f5faf8;
+  --main-10: #f8fcfa;
+  --main-5: #fbfdfc;
+  --main-1: #fdfefe;
   --main-0: #ffffff;
 
   /* 保留原有的 main 变量 */
   --main-color: var(--main-700);
-  --main-bright: #0188a6;
+  --main-bright: #0f9a7f;
 
   --gray-10000: #000000; /* 保持纯黑 */
   --gray-2000: #0c0d0d; /* 更精致的暗灰，用于极深背景 */
-  --gray-1000: #151616; /* 深灰黑，适用于主文本 */
+  --gray-1000: #1b2421; /* 品牌深色文字 */
   --gray-900: #1e1f1f;
   --gray-800: #323333; /* 标准深灰，适合背景 */
   --gray-700: #4c4d4d;
-  --gray-600: #697070; /* 调和中灰，适合次要文本 */
-  --gray-500: #979999; /* 更柔和的中灰色 */
+  --gray-600: #676767; /* 次要文本 */
+  --gray-500: #909090; /* 弱化文本 */
   --gray-400: #bdbfbf;
-  --gray-300: #d7d9d9; /* 修正了原300/200重复 */
-  --gray-200: #e4e6e6; /* 稍微加深一点，便于分层 */
+  --gray-300: #d7d7d2; /* 强分隔线 */
+  --gray-200: #e7e7e4; /* 分隔线 */
   --gray-150: #eef0f0;
   --gray-100: #eff2f2;
-  --gray-50: #f5f7f7;
+  --gray-50: #f7f7f5;
   --gray-25: #f8fafa;
   --gray-10: #fbfcfc;
   --gray-0: #ffffff;
@@ -56,33 +56,33 @@
   --color-secondary-700: var(--gray-800); /* 次要色-深 */
   --color-secondary-900: var(--gray-900); /* 次要色-最深 */
 
-  --color-success-10: #fafff2; /* 成功色-极浅 */
-  --color-success-50: #e6f7e6; /* 成功色-最浅 */
-  --color-success-100: #b7eb8f; /* 成功色-浅 */
-  --color-success-500: #52c41a; /* 成功色-标准 */
-  --color-success-700: #389e0d; /* 成功色-深 */
-  --color-success-900: #135200; /* 成功色-最深 */
+  --color-success-10: #f5fbf8; /* 成功色-极浅 */
+  --color-success-50: #e8f3ef; /* 成功色-最浅 */
+  --color-success-100: #cce7dd; /* 成功色-浅 */
+  --color-success-500: #0f766e; /* 成功色-标准 */
+  --color-success-700: #0b5f4e; /* 成功色-深 */
+  --color-success-900: #064e42; /* 成功色-最深 */
 
-  --color-error-10: #fffaf9; /* 错误色-极浅 */
-  --color-error-50: #fff2f0; /* 错误色-最浅 */
-  --color-error-100: #ffccc7; /* 错误色-浅 */
-  --color-error-500: #ff4d4f; /* 错误色-标准 */
-  --color-error-700: #cf1322; /* 错误色-深 */
-  --color-error-900: #820014; /* 错误色-最深 */
+  --color-error-10: #fff8f8; /* 错误色-极浅 */
+  --color-error-50: #fff1f2; /* 错误色-最浅 */
+  --color-error-100: #fbc8cc; /* 错误色-浅 */
+  --color-error-500: #b4232c; /* 错误色-标准 */
+  --color-error-700: #912018; /* 错误色-深 */
+  --color-error-900: #6f1d24; /* 错误色-最深 */
 
-  --color-warning-10: #fffef5; /* 警告色-极浅 */
-  --color-warning-50: #fffbe6; /* 警告色-最浅 */
-  --color-warning-100: #ffe58f; /* 警告色-浅 */
-  --color-warning-500: #faad14; /* 警告色-标准 */
-  --color-warning-700: #d48806; /* 警告色-深 */
-  --color-warning-900: #ad6800; /* 警告色-最深 */
+  --color-warning-10: #fffdf5; /* 警告色-极浅 */
+  --color-warning-50: #fff7df; /* 警告色-最浅 */
+  --color-warning-100: #f6dfa4; /* 警告色-浅 */
+  --color-warning-500: #9a6700; /* 警告色-标准 */
+  --color-warning-700: #7a5100; /* 警告色-深 */
+  --color-warning-900: #5c3d00; /* 警告色-最深 */
 
-  --color-info-10: #f5fbff; /* 信息色-极浅 */
-  --color-info-50: #e6f7ff; /* 信息色-最浅 */
-  --color-info-100: #bae7ff; /* 信息色-浅 */
-  --color-info-500: #1890ff; /* 信息色-标准 */
-  --color-info-700: #096dd9; /* 信息色-深 */
-  --color-info-900: #0050b3; /* 信息色-最深 */
+  --color-info-10: #f5fbf8; /* 信息色-极浅 */
+  --color-info-50: #eaf5f2; /* 信息色-最浅 */
+  --color-info-100: #cbe9df; /* 信息色-浅 */
+  --color-info-500: #0f766e; /* 信息色-标准 */
+  --color-info-700: #0b5f4e; /* 信息色-深 */
+  --color-info-900: #064e42; /* 信息色-最深 */
 
   --color-accent-10: #f5fffe; /* 强调色-极浅 */
   --color-accent-50: #e6fffb; /* 强调色-最浅 */
@@ -138,6 +138,11 @@
   --shadow-3: rgba(0, 0, 0, 0.12);
   --shadow-4: rgba(0, 0, 0, 0.16);
   --shadow-5: rgba(0, 0, 0, 0.2);
+  --shadow: 0 18px 48px rgba(24, 24, 22, 0.14);
+  --small-shadow: 0 8px 24px rgba(24, 24, 22, 0.08);
+
+  --sidebar-width: 264px;
+  --conversation-width: 820px;
 
   --min-width: 400px;
 
@@ -148,8 +153,8 @@
   --color-bg-container: var(--main-0);
   --color-bg-elevated: var(--gray-10);
   --color-text: var(--gray-1000);
-  --color-text-secondary: var(--dark-70);
-  --color-text-tertiary: var(--dark-50);
+  --color-text-secondary: var(--gray-600);
+  --color-text-tertiary: var(--gray-500);
   --color-trans-light: var(--light-85);
   --color-trans-dark: var(--dark-85);
 }

@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 
 from yuxi.storage.postgres.manager import pg_manager
 from yuxi.storage.postgres.models_business import Department
@@ -26,7 +26,11 @@ class DepartmentRepository:
     async def list_departments(self) -> list[Department]:
         """获取所有部门列表"""
         async with pg_manager.get_async_session_context() as session:
-            result = await session.execute(select(Department).order_by(Department.created_at.desc()))
+            result = await session.execute(
+                select(Department)
+                .where(or_(Department.dingtalk_corp_id.is_(None), Department.dingtalk_active.is_(True)))
+                .order_by(Department.created_at.desc())
+            )
             return list(result.scalars().all())
 
     async def list_with_user_count(self) -> list[dict[str, Any]]:
@@ -34,7 +38,11 @@ class DepartmentRepository:
         async with pg_manager.get_async_session_context() as session:
             from yuxi.storage.postgres.models_business import User
 
-            result = await session.execute(select(Department).order_by(Department.created_at.desc()))
+            result = await session.execute(
+                select(Department)
+                .where(or_(Department.dingtalk_corp_id.is_(None), Department.dingtalk_active.is_(True)))
+                .order_by(Department.created_at.desc())
+            )
             departments = result.scalars().all()
 
             department_list = []

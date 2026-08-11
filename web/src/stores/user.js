@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { useAgentStore } from './agent'
+import { getDingTalkPublicConfig, requestDingTalkAuthCode } from '@/utils/dingtalkAuth'
 
 export const useUserStore = defineStore('user', () => {
   // 状态
@@ -18,6 +19,19 @@ export const useUserStore = defineStore('user', () => {
   const isLoggedIn = computed(() => !!token.value)
   const isAdmin = computed(() => userRole.value === 'admin' || userRole.value === 'superadmin')
   const isSuperAdmin = computed(() => userRole.value === 'superadmin')
+
+  function applyLoginResponse(data) {
+    token.value = data.access_token
+    userId.value = data.user_id
+    username.value = data.username
+    uid.value = data.uid
+    phoneNumber.value = data.phone_number || ''
+    avatar.value = data.avatar || ''
+    userRole.value = data.role
+    departmentId.value = data.department_id || null
+    departmentName.value = data.department_name || ''
+    localStorage.setItem('user_token', data.access_token)
+  }
 
   // 动作
   async function login(credentials) {
@@ -48,25 +62,42 @@ export const useUserStore = defineStore('user', () => {
 
       const data = await response.json()
 
-      // 更新状态
-      token.value = data.access_token
-      userId.value = data.user_id
-      username.value = data.username
-      uid.value = data.uid
-      phoneNumber.value = data.phone_number || ''
-      avatar.value = data.avatar || ''
-      userRole.value = data.role
-      departmentId.value = data.department_id || null
-      departmentName.value = data.department_name || ''
-
-      // 只保存 token 到本地存储
-      localStorage.setItem('user_token', data.access_token)
+      applyLoginResponse(data)
 
       return true
     } catch (error) {
       console.error('登录错误:', error)
       throw error
     }
+  }
+
+  /** 在钉钉 H5 环境中使用 JSAPI 完成免登。 */
+  async function loginWithDingTalk() {
+    const config = await getDingTalkPublicConfig()
+    if (!config.corpId) {
+      throw new Error('钉钉 corpId 未配置')
+    }
+
+    const authCode = await requestDingTalkAuthCode(config.corpId, config.clientId)
+    const response = await fetch('/api/auth/dingtalk/h5', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ authCode })
+    })
+
+    if (!response.ok) {
+      let detail = '钉钉免登失败'
+      try {
+        const error = await response.json()
+        detail = error.detail || detail
+      } catch {
+        // 保留通用错误信息
+      }
+      throw new Error(detail)
+    }
+
+    applyLoginResponse(await response.json())
+    return true
   }
 
   function logout() {
@@ -106,19 +137,7 @@ export const useUserStore = defineStore('user', () => {
 
       const data = await response.json()
 
-      // 更新状态
-      token.value = data.access_token
-      userId.value = data.user_id
-      username.value = data.username
-      uid.value = data.uid
-      phoneNumber.value = data.phone_number || ''
-      avatar.value = data.avatar || ''
-      userRole.value = data.role
-      departmentId.value = data.department_id || null
-      departmentName.value = data.department_name || ''
-
-      // 只保存 token 到本地存储
-      localStorage.setItem('user_token', data.access_token)
+      applyLoginResponse(data)
 
       return true
     } catch (error) {
@@ -390,6 +409,7 @@ export const useUserStore = defineStore('user', () => {
 
     // 方法
     login,
+    loginWithDingTalk,
     logout,
     initialize,
     checkFirstRun,

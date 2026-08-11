@@ -250,7 +250,7 @@
                         <CornerDownRight :size="14" aria-hidden="true" />
                         引导
                       </button>
-                      <div class="input-model-selector">
+                      <div v-if="userStore.isAdmin" class="input-model-selector">
                         <ModelSelectorComponent
                           :model_spec="currentModelSpec"
                           size="nano"
@@ -697,6 +697,7 @@ import { useAgentStore } from '@/stores/agent'
 import { useChatThreadsStore } from '@/stores/chatThreads'
 import { useChatUIStore } from '@/stores/chatUI'
 import { useConfigStore } from '@/stores/config'
+import { useUserStore } from '@/stores/user'
 import { storeToRefs } from 'pinia'
 import { MessageProcessor } from '@/utils/messageProcessor'
 import { agentApi, threadApi } from '@/apis'
@@ -738,6 +739,7 @@ const agentStore = useAgentStore()
 const chatThreadsStore = useChatThreadsStore()
 const chatUIStore = useChatUIStore()
 const configStore = useConfigStore()
+const userStore = useUserStore()
 const { agents, selectedAgentId, agentConfig, configurableItems, availableKnowledgeBases } =
   storeToRefs(agentStore)
 const { threads, currentThreadId, currentThread } = storeToRefs(chatThreadsStore)
@@ -3450,9 +3452,7 @@ watch(currentChatId, (threadId, oldThreadId) => {
   background: var(--gray-0);
   border: 1px solid var(--gray-150);
   border-radius: 10px;
-  box-shadow:
-    0 16px 40px var(--shadow-1),
-    0 2px 10px var(--shadow-0);
+  box-shadow: var(--shadow);
   z-index: 20;
   min-width: 0;
   opacity: 0;
@@ -3499,7 +3499,7 @@ watch(currentChatId, (threadId, oldThreadId) => {
   height: auto;
   max-height: calc(100% - 8px);
   max-width: min(340px, calc(100vw - 24px));
-  box-shadow: 0 4px 16px var(--shadow-0);
+  box-shadow: var(--small-shadow);
   overflow: auto;
 }
 
@@ -3522,9 +3522,7 @@ watch(currentChatId, (threadId, oldThreadId) => {
   max-height: calc(100% - 16px);
   margin: 0;
   z-index: 26;
-  box-shadow:
-    0 12px 28px var(--shadow-1),
-    0 2px 8px var(--shadow-0);
+  box-shadow: var(--small-shadow);
 }
 
 .state-panel {
@@ -3686,7 +3684,7 @@ watch(currentChatId, (threadId, oldThreadId) => {
 
 .chat-box {
   width: 100%;
-  max-width: 800px;
+  max-width: var(--conversation-width);
   margin: 0 auto;
   flex-grow: 1;
   padding: 1rem var(--page-padding);
@@ -3719,7 +3717,7 @@ watch(currentChatId, (threadId, oldThreadId) => {
 
   .message-input-wrapper {
     width: 100%;
-    max-width: 800px;
+    max-width: var(--conversation-width);
     margin: 0 auto;
 
     .message-input-stage {
@@ -3955,7 +3953,7 @@ watch(currentChatId, (threadId, oldThreadId) => {
     left: 50%;
     transform: translate(-50%, -50%);
     bottom: auto;
-    max-width: 800px;
+    max-width: var(--conversation-width);
     width: 90%;
     background: transparent;
     padding: 0;

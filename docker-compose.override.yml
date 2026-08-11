@@ -1,0 +1,20 @@
+# 本地开发覆盖：使用本机已有的镜像，并避开与本机其他项目冲突的端口
+# 该文件由 docker compose 自动加载；如需回到仓库默认行为，删除本文件即可。
+services:
+  postgres:
+    image: postgres:17
+  minio:
+    image: minio/minio:RELEASE.2024-10-13T13-34-11Z
+    # 本机 9000/9001 被 langfuse-clickhouse 等占用，改映射到 19000/19001（!override 替换而非拼接）
+    ports: !override
+      - "127.0.0.1:19000:9000"
+      - "127.0.0.1:19001:9001"
+  web:
+    # 本机 5173 被其他 node 进程占用，前端改在 5174 访问
+    ports: !override
+      - "5174:5173"
+  milvus:
+    # 本机 9091 被 langfuse-minio 占用，指标端口改映射到 19091（19530 不受影响）
+    ports: !override
+      - "127.0.0.1:19530:19530"
+      - "127.0.0.1:19091:9091"

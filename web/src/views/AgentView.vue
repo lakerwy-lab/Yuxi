@@ -10,7 +10,7 @@
         >
           <template #input-actions-left="{ hasActiveThread }">
             <a-dropdown
-              v-if="selectedAgentId"
+              v-if="userStore.isAdmin && selectedAgentId"
               v-model:open="agentDropdownOpen"
               :trigger="['click']"
               placement="topLeft"
@@ -118,6 +118,7 @@ import { Settings2, ChevronDown, Check, Plus } from 'lucide-vue-next'
 import { useRoute, useRouter } from 'vue-router'
 import { agentApi } from '@/apis/agent_api'
 import { useOutsidePointerdown } from '@/composables/useOutsidePointerdown'
+import { useUserStore } from '@/stores/user'
 import AgentChatComponent from '@/components/AgentChatComponent.vue'
 import AgentEditModal from '@/components/model-management/AgentEditModal.vue'
 import { isBuiltinAgent, useAgentStore } from '@/stores/agent'
@@ -133,6 +134,7 @@ const agentEditModalRef = ref(null)
 
 // Stores
 const agentStore = useAgentStore()
+const userStore = useUserStore()
 const route = useRoute()
 const router = useRouter()
 

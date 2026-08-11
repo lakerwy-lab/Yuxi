@@ -49,6 +49,13 @@ async def test_ensure_business_schema_backfills_subagent_thread_columns_before_d
 
     statements = "\n".join(connection.statements)
 
+    assert "users ADD COLUMN IF NOT EXISTS dingtalk_corp_id VARCHAR(128)" in statements
+    assert "departments ADD COLUMN IF NOT EXISTS dingtalk_dept_id VARCHAR(128)" in statements
+    assert "uq_departments_dingtalk_corp_dept" in statements
+    assert "users ADD COLUMN IF NOT EXISTS dingtalk_union_id VARCHAR(128)" in statements
+    assert "users ADD COLUMN IF NOT EXISTS dingtalk_user_id VARCHAR(128)" in statements
+    assert "uq_users_dingtalk_corp_union" in statements
+    assert "uq_users_dingtalk_corp_user" in statements
     assert "SET agent_slug = agent_id" in statements
     assert "SET conversation_thread_id = thread_id" in statements
     assert "SET created_by_run_id = COALESCE(parent_agent_run_id, parent_run_id)" in statements

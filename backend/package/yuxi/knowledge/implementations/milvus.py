@@ -39,6 +39,7 @@ CONTENT_ANALYZER_PARAMS = {"type": "chinese"}
 VECTOR_METRIC_TYPE = "COSINE"
 MILVUS_CHUNK_EMBED_BATCH_SIZE = 200
 MILVUS_QUERY_OFFLOAD_LIMIT = 8
+QA_PAIR_FILE_PREFIX = "qa_pair:"
 _milvus_query_offload_semaphore_refs: dict[
     int,
     tuple[weakref.ReferenceType[asyncio.AbstractEventLoop], weakref.ReferenceType[asyncio.Semaphore]],
@@ -64,6 +65,18 @@ def _get_milvus_query_offload_semaphore() -> asyncio.Semaphore:
 
     _milvus_query_offload_semaphore_refs[loop_id] = (weakref.ref(loop), weakref.ref(semaphore, cleanup))
     return semaphore
+
+
+def _qa_pair_identity(file_id: Any) -> tuple[int, int] | None:
+    """从问答对合成文件 ID 解析业务 ID 和 revision。"""
+
+    value = str(file_id or "")
+    if not value.startswith(QA_PAIR_FILE_PREFIX) or ":r" not in value:
+        return None
+    qa_id, revision = value.removeprefix(QA_PAIR_FILE_PREFIX).split(":r", 1)
+    if not qa_id.isdigit() or not revision.isdigit():
+        return None
+    return int(qa_id), int(revision)
 
 
 async def _run_milvus_query_io(func, /, *args, **kwargs):
@@ -528,6 +541,8 @@ class MilvusKB(KnowledgeBase):
                 "start_token_pos": chunk.get("start_token_pos"),
                 "end_token_pos": chunk.get("end_token_pos"),
                 "graph_indexed": bool(chunk.get("graph_indexed", False)),
+                "graph_structure_indexed": bool(chunk.get("graph_structure_indexed", False)),
+                "graph_extraction_details": chunk.get("graph_extraction_details"),
                 "ent_ids": chunk.get("ent_ids"),
                 "tags": chunk.get("tags"),
                 "extraction_result": chunk.get("extraction_result"),
@@ -603,6 +618,84 @@ class MilvusKB(KnowledgeBase):
                 batch_chunks,
                 embeddings,
             )
+
+    async def upsert_qa_pair_index(
+        self,
+        *,
+        kb_id: str,
+        qa_pair_id: int,
+        revision: int,
+        standard_question: str,
+        aliases: list[str],
+        config: KnowledgeBaseConfig,
+        previous_revision: int | None = None,
+    ) -> str:
+        """将一条问答对按版本写入 Milvus，成功后再清理旧版本。"""
+
+        file_id = f"{QA_PAIR_FILE_PREFIX}{qa_pair_id}:r{revision}"
+        collection = await self._get_or_create_milvus_collection(kb_id, config.embedding_model_spec)
+        if collection is None:
+            raise ValueError(f"Database {kb_id} not found")
+
+        # 重试同一版本前先清理半成品；旧有效版本保留到新版本完整写入之后。
+        await self.delete_file(kb_id, file_id)
+        variants = [standard_question, *aliases]
+        content = "\n".join(f"问题：{value}" for value in variants if str(value).strip())
+        content_hash = hashstr(content, 64)
+        await KnowledgeFileRepository().upsert(
+            file_id,
+            {
+                "kb_id": kb_id,
+                "filename": f".qa/{qa_pair_id}.md",
+                "original_filename": f"问答对-{qa_pair_id}",
+                "file_type": "qa_pair",
+                "content_type": "qa_pair",
+                "status": FileStatus.INDEXED,
+                "content_hash": content_hash,
+                "file_size": len(content.encode("utf-8")),
+                "chunk_count": 1,
+                "token_count": count_tokens(content),
+                "processing_params": {
+                    "source_type": "qa_pair",
+                    "qa_pair_id": qa_pair_id,
+                    "qa_revision": revision,
+                },
+                "is_folder": False,
+            },
+        )
+
+        chunk = {
+            "id": file_id,
+            "chunk_id": file_id,
+            "file_id": file_id,
+            "chunk_index": 0,
+            "content": content,
+            "graph_indexed": True,
+            "graph_structure_indexed": True,
+            "graph_extraction_details": {"status": "succeeded", "reason": "qa_pair_skipped"},
+            "tags": {"source_type": "qa_pair", "qa_pair_id": qa_pair_id, "qa_revision": revision},
+        }
+        embedding_function = self._get_embedding_function(config.embedding_model_spec)
+        try:
+            await self._embed_and_store_chunks(kb_id, file_id, collection, [chunk], embedding_function)
+        except Exception:
+            await self.delete_file(kb_id, file_id)
+            raise
+
+        if previous_revision and previous_revision != revision:
+            previous_file_id = f"{QA_PAIR_FILE_PREFIX}{qa_pair_id}:r{previous_revision}"
+            try:
+                await self.delete_file(kb_id, previous_file_id)
+            except Exception as exc:  # 新版本已经可用，旧版本清理失败只记录并交给后续重试。
+                logger.warning(f"Failed to delete stale QA pair index {previous_file_id}: {exc}")
+        return file_id
+
+    async def delete_qa_pair_index(self, kb_id: str, qa_pair_id: int, revision: int | None) -> None:
+        """删除一条问答对当前有效的合成文件和向量。"""
+
+        if revision is None:
+            return
+        await self.delete_file(kb_id, f"{QA_PAIR_FILE_PREFIX}{qa_pair_id}:r{revision}")
 
     async def _delete_file_chunks_from_milvus(self, collection: Collection, file_id: str) -> None:
         expr = f'file_id == "{file_id}"'
@@ -892,6 +985,13 @@ class MilvusKB(KnowledgeBase):
             "file_id": file_id,
             "chunk_index": entity.get("chunk_index"),
         }
+        qa_identity = _qa_pair_identity(file_id)
+        if qa_identity:
+            metadata.update(
+                source_type="qa_pair",
+                qa_pair_id=qa_identity[0],
+                qa_revision=qa_identity[1],
+            )
         chunk = {"content": entity.get("content", ""), "metadata": metadata, "score": float(score or 0.0)}
         if score_field:
             chunk[score_field] = float(score or 0.0)
@@ -1058,6 +1158,11 @@ class MilvusKB(KnowledgeBase):
                 return []
 
             await self._hydrate_chunk_sources(kb_id, retrieved_chunks)
+
+            from yuxi.services.qa_pair_service import enrich_qa_pair_hits, filter_qa_pair_hits
+
+            await enrich_qa_pair_hits(retrieved_chunks)
+            retrieved_chunks = filter_qa_pair_hits(query_text, retrieved_chunks, final_top_k)
 
             if not use_reranker:
                 return retrieved_chunks[:final_top_k]

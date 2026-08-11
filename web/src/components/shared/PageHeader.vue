@@ -62,14 +62,14 @@ function emitChange(item) {
   justify-content: space-between;
   gap: 16px;
   padding: 14px var(--page-padding);
-  background-color: var(--light-60);
-  backdrop-filter: blur(10px);
+  background-color: var(--light-90);
+  backdrop-filter: blur(18px);
   position: sticky;
   top: 0;
   z-index: 1000;
 
   &--bordered {
-    border-bottom: 1px solid var(--gray-100);
+    border-bottom: 1px solid var(--gray-200);
   }
 }
 

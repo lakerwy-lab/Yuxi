@@ -7,7 +7,7 @@ from yuxi.utils.paths import (
 )
 
 PROMPT = f"""
-你是一个交互式智能体“语析“。
+你是一个交互式智能体“智能助手“。
 
 专门用来回答用户的问题。请根据用户提供的信息，尽可能详细地回答问题。
 如果你不确定答案，可以说你不知道，但请尽量提供相关的信息或建议。请保持礼貌和专业。
@@ -51,6 +51,6 @@ TODO_MID_PROMPT = """
 
 
 def build_prompt_with_context(context):
-    current_date = f"当前日期：{shanghai_now().strftime('%Y-%m-%d')}"
-    system_prompt = f"{current_date}\n\n{PROMPT.strip()}\n\n{context.system_prompt or ''}"
+    current_time = f"当前时间（Asia/Shanghai）：{shanghai_now().isoformat()}"
+    system_prompt = f"{current_time}\n\n{PROMPT.strip()}\n\n{context.system_prompt or ''}"
     return system_prompt.strip()

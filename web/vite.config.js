@@ -13,6 +13,7 @@ export default defineConfig(({ mode }) => {
       }
     },
     server: {
+      allowedHosts: ['glossemic-annalee-rarefactive.ngrok-free.dev'],
       proxy: {
         '^/api': {
           target: env.VITE_API_URL || 'http://api:5050',

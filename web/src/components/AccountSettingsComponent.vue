@@ -109,7 +109,7 @@
           </div>
         </div>
       </div>
-      <UserConfigSettingsCard ref="userConfigRef" />
+      <UserConfigSettingsCard v-if="userStore.isAdmin" ref="userConfigRef" />
     </div>
   </div>
 </template>
