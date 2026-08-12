@@ -119,7 +119,7 @@
               v-for="user in paginatedUsers"
               :key="user.id"
               :title="user.username"
-              :subtitle="`ID: ${user.uid || '-'}`"
+              :subtitle="user.phone_number || getRoleLabel(user.role)"
               class="user-card"
             >
               <template #icon>
@@ -844,6 +844,19 @@ const getRoleClass = (role) => {
       return 'role-user'
     default:
       return 'role-default'
+  }
+}
+
+const getRoleLabel = (role) => {
+  switch (role) {
+    case 'superadmin':
+      return '超级管理员'
+    case 'admin':
+      return '管理员'
+    case 'user':
+      return '普通用户'
+    default:
+      return '用户'
   }
 }
 
