@@ -11,6 +11,8 @@ x-api-worker-env: &api-worker-env
   RUN_CANCEL_KEY_TTL_SECONDS: ${RUN_CANCEL_KEY_TTL_SECONDS:-1800}
   RUN_EVENTS_STREAM_TTL_SECONDS: ${RUN_EVENTS_STREAM_TTL_SECONDS:-7200}
   YUXI_CORS_ORIGINS: ${YUXI_CORS_ORIGINS:-}
+  YUXI_DOCKER_API_BASE: ${YUXI_DOCKER_API_BASE:-http://localhost}
+  YUXI_DATASET_PERSIST_BATCH_SIZE: ${YUXI_DATASET_PERSIST_BATCH_SIZE:-1}
   NEO4J_URI: ${NEO4J_URI:-bolt://graph:7687}
   NEO4J_USERNAME: ${NEO4J_USERNAME:-neo4j}
   NEO4J_PASSWORD: ${NEO4J_PASSWORD:?Set NEO4J_PASSWORD in .env}
@@ -26,6 +28,10 @@ x-api-worker-env: &api-worker-env
   SANDBOX_VIRTUAL_PATH_PREFIX: ${SANDBOX_VIRTUAL_PATH_PREFIX:-/home/gem/user-data}
   SANDBOX_EXEC_TIMEOUT_SECONDS: ${SANDBOX_EXEC_TIMEOUT_SECONDS:-180}
   SANDBOX_MAX_OUTPUT_BYTES: ${SANDBOX_MAX_OUTPUT_BYTES:-262144}
+  # Model request timeouts
+  EMBEDDING_TIMEOUT: ${EMBEDDING_TIMEOUT:-600}
+  LLM_TIMEOUT: ${LLM_TIMEOUT:-600}
+  TASKER_DEFAULT_TIMEOUT_SECONDS: ${TASKER_DEFAULT_TIMEOUT_SECONDS:-21600}
   NO_PROXY: localhost,127.0.0.1,milvus,graph,minio,milvus-etcd,etcd,mineru,paddlex,sandbox-provisioner,api.siliconflow.cn
   no_proxy: localhost,127.0.0.1,milvus,graph,minio,milvus-etcd,etcd,mineru,paddlex,sandbox-provisioner,api.siliconflow.cn
 
@@ -44,6 +50,7 @@ services:
       - ./docker/volumes/models:/app/models
       - ./backend/scripts:/app/scripts
       - /var/run/docker.sock:/var/run/docker.sock
+      - ./docker/sandbox_provisioner:/app/docker/sandbox_provisioner:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
     env_file:
@@ -83,6 +90,7 @@ services:
       - ./docker/volumes/yuxi:/app/saves
       - ./docker/volumes/models:/app/models
       - /var/run/docker.sock:/var/run/docker.sock
+      - ./docker/sandbox_provisioner:/app/docker/sandbox_provisioner:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
     env_file:
