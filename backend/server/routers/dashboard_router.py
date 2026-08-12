@@ -1091,7 +1091,7 @@ async def get_user_messages(
                 answer=answers.get(row[0], "")[:500],
                 agent_id=row[4] or "",
                 conversation_title=row[5] or "",
-                created_at=ensure_shanghai(row[6]).strftime("%Y-%m-%d %H:%M:%S") if row[6] else "",
+                created_at=(row[6].replace(tzinfo=UTC).astimezone(ensure_shanghai(row[6])).strftime("%Y-%m-%d %H:%M:%S")) if row[6] else "",
                 feedback=row[7],
             )
             for row in rows

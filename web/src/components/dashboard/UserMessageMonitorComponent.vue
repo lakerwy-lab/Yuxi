@@ -138,7 +138,7 @@ onMounted(() => {
 
 <style scoped lang="less">
 .monitor-card {
-  margin-top: 24px;
+  margin: 12px var(--page-padding);
   background-color: var(--gray-0, #ffffff);
   border-radius: 8px;
 
