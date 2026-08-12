@@ -626,11 +626,17 @@ class MilvusKB(KnowledgeBase):
         qa_pair_id: int,
         revision: int,
         standard_question: str,
+        answer: str,
         aliases: list[str],
         config: KnowledgeBaseConfig,
         previous_revision: int | None = None,
     ) -> str:
-        """将一条问答对按版本写入 Milvus，成功后再清理旧版本。"""
+        """将一条问答对按版本写入 Milvus，写入方式与 Yuxi QA 分块策略一致。
+
+        content 格式为 ``问题：{q}\\t回答：{a}``，问题与答案均在 content 中参与向量相似度计算，
+        和文档走 QA 分块策略产生的 chunk 行为完全一致，不携带 source_type 门控标记。
+        标准问题和每个 alias 分别生成一条 chunk，共享同一份答案。
+        """
 
         file_id = f"{QA_PAIR_FILE_PREFIX}{qa_pair_id}:r{revision}"
         collection = await self._get_or_create_milvus_collection(kb_id, config.embedding_model_spec)
@@ -639,9 +645,21 @@ class MilvusKB(KnowledgeBase):
 
         # 重试同一版本前先清理半成品；旧有效版本保留到新版本完整写入之后。
         await self.delete_file(kb_id, file_id)
-        variants = [standard_question, *aliases]
-        content = "\n".join(f"问题：{value}" for value in variants if str(value).strip())
-        content_hash = hashstr(content, 64)
+        variants = [v for v in [standard_question, *aliases] if str(v).strip()]
+        if not variants:
+            variants = [standard_question]
+        answer_text = str(answer or "").strip()
+        chunks_payload = []
+        for idx, q in enumerate(variants):
+            content = f"问题：{q}\t回答：{answer_text}"
+            chunks_payload.append(
+                {
+                    "chunk_index": idx,
+                    "content": content,
+                }
+            )
+        combined_content = "\n".join(c["content"] for c in chunks_payload)
+        content_hash = hashstr(combined_content, 64)
         await KnowledgeFileRepository().upsert(
             file_id,
             {
@@ -652,11 +670,10 @@ class MilvusKB(KnowledgeBase):
                 "content_type": "qa_pair",
                 "status": FileStatus.INDEXED,
                 "content_hash": content_hash,
-                "file_size": len(content.encode("utf-8")),
-                "chunk_count": 1,
-                "token_count": count_tokens(content),
+                "file_size": len(combined_content.encode("utf-8")),
+                "chunk_count": len(chunks_payload),
+                "token_count": count_tokens(combined_content),
                 "processing_params": {
-                    "source_type": "qa_pair",
                     "qa_pair_id": qa_pair_id,
                     "qa_revision": revision,
                 },
@@ -664,20 +681,23 @@ class MilvusKB(KnowledgeBase):
             },
         )
 
-        chunk = {
-            "id": file_id,
-            "chunk_id": file_id,
-            "file_id": file_id,
-            "chunk_index": 0,
-            "content": content,
-            "graph_indexed": True,
-            "graph_structure_indexed": True,
-            "graph_extraction_details": {"status": "succeeded", "reason": "qa_pair_skipped"},
-            "tags": {"source_type": "qa_pair", "qa_pair_id": qa_pair_id, "qa_revision": revision},
-        }
+        chunks = [
+            {
+                "id": f"{file_id}:c{c['chunk_index']}",
+                "chunk_id": f"{file_id}:c{c['chunk_index']}",
+                "file_id": file_id,
+                "chunk_index": c["chunk_index"],
+                "content": c["content"],
+                "graph_indexed": True,
+                "graph_structure_indexed": True,
+                "graph_extraction_details": {"status": "succeeded", "reason": "qa_pair_skipped"},
+                "tags": {"qa_pair_id": qa_pair_id, "qa_revision": revision},
+            }
+            for c in chunks_payload
+        ]
         embedding_function = self._get_embedding_function(config.embedding_model_spec)
         try:
-            await self._embed_and_store_chunks(kb_id, file_id, collection, [chunk], embedding_function)
+            await self._embed_and_store_chunks(kb_id, file_id, collection, chunks, embedding_function)
         except Exception:
             await self.delete_file(kb_id, file_id)
             raise
@@ -1158,11 +1178,6 @@ class MilvusKB(KnowledgeBase):
                 return []
 
             await self._hydrate_chunk_sources(kb_id, retrieved_chunks)
-
-            from yuxi.services.qa_pair_service import enrich_qa_pair_hits, filter_qa_pair_hits
-
-            await enrich_qa_pair_hits(retrieved_chunks)
-            retrieved_chunks = filter_qa_pair_hits(query_text, retrieved_chunks, final_top_k)
 
             if not use_reranker:
                 return retrieved_chunks[:final_top_k]

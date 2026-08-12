@@ -77,19 +77,6 @@ const router = createRouter({
       ]
     },
     {
-      path: '/migration',
-      name: 'migration',
-      component: AppLayout,
-      children: [
-        {
-          path: '',
-          name: 'MigrationComp',
-          component: () => import('../views/MigrationAdminView.vue'),
-          meta: { keepAlive: false, requiresAuth: true, requiresSuperAdmin: true }
-        }
-      ]
-    },
-    {
       path: '/agent-manage',
       name: 'agent-manage',
       component: AppLayout,

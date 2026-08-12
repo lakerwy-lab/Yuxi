@@ -251,6 +251,7 @@ async def _upsert_qa_pair_index(item: QAPair) -> None:
         qa_pair_id=item.id,
         revision=item.revision,
         standard_question=item.question,
+        answer=item.answer,
         aliases=item.aliases or [],
         config=config,
         previous_revision=item.indexed_revision,

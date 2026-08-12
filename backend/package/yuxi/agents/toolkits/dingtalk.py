@@ -1,9 +1,8 @@
 """钉钉会议室与转人工工具。"""
 
-from __future__ import annotations
+from typing import Annotated, Any
 
-from typing import Any
-
+from langchain_core.tools import InjectedToolArg
 from langgraph.prebuilt.tool_node import ToolRuntime
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -16,6 +15,10 @@ from yuxi.storage.postgres.models_business import User
 class MeetingSearchInput(BaseModel):
     start_time: str | None = Field(default=None, description="ISO 8601 开始时间，必须含时区或使用 Asia/Shanghai")
     end_time: str | None = Field(default=None, description="ISO 8601 结束时间，必须含时区或使用 Asia/Shanghai")
+    capacity: int = Field(default=1, description="所需会议室最小容量，默认 1 人")
+    building: str | None = Field(default=None, description="楼宇名称（宽松子串匹配）")
+    floor: str | None = Field(default=None, description="楼层")
+    equipment: list[str] | None = Field(default=None, description="所需设施列表，全匹配")
 
 
 class MeetingPreviewInput(BaseModel):
@@ -63,13 +66,39 @@ async def _current_dingtalk_user(runtime: ToolRuntime) -> User:
     description="按可选时间段查询当前用户可见的钉钉会议室。会议预订前必须先调用此工具。",
     args_schema=MeetingSearchInput,
 )
-async def search_meeting_rooms(start_time: str | None, end_time: str | None, runtime: ToolRuntime) -> dict[str, Any]:
+async def search_meeting_rooms(
+    start_time: str | None,
+    end_time: str | None,
+    capacity: int,
+    building: str | None,
+    floor: str | None,
+    equipment: list[str] | None,
+    runtime: Annotated[ToolRuntime, InjectedToolArg],
+) -> dict[str, Any]:
     """查询会议室并返回结构化卡片数据。"""
     from yuxi.services.dingtalk_meeting_service import MeetingRoomService
+    from yuxi.storage.postgres.models_dingtalk import DingTalkUserDepartmentSnapshot
 
     user = await _current_dingtalk_user(runtime)
     async with pg_manager.get_async_session_context() as db:
-        rooms = await MeetingRoomService(db).search_rooms(user.dingtalk_union_id, start_time, end_time)
+        # 从钉钉通讯录快照取 user_id（用于查办公地排序）
+        dept_row = await db.scalar(
+            select(DingTalkUserDepartmentSnapshot)
+            .where(DingTalkUserDepartmentSnapshot.union_id == user.dingtalk_union_id)
+            .where(DingTalkUserDepartmentSnapshot.active == True)  # noqa: E712
+            .limit(1)
+        )
+        dingtalk_user_id = dept_row.user_id if dept_row else None
+        rooms = await MeetingRoomService(db).search_rooms(
+            user.dingtalk_union_id,
+            start_time,
+            end_time,
+            capacity=capacity,
+            building=building,
+            floor=floor,
+            equipment=equipment,
+            user_id=dingtalk_user_id,
+        )
     return {"type": "meeting_rooms", "items": rooms}
 
 

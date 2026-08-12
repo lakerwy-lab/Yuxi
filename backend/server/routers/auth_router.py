@@ -98,7 +98,7 @@ class UserResponse(BaseModel):
     role: str
     department_id: int | None = None
     department_name: str | None = None  # 部门名称
-    created_at: str
+    created_at: str | None = None
     last_login: str | None = None
 
 

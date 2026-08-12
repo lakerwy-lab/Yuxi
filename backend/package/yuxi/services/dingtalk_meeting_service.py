@@ -96,15 +96,21 @@ class DingTalkMeetingClient:
     async def query_room_availability(
         self, union_id: str, room_ids: list[str], start_time: str, end_time: str
     ) -> list[dict[str, Any]]:
-        body = await self._request(
-            "POST",
-            f"/v1.0/calendar/users/{union_id}/meetingRooms/schedules/query",
-            json={"roomIds": room_ids, "startTime": start_time, "endTime": end_time},
-        )
-        result = body.get("result")
-        if not isinstance(result, list):
-            result = body.get("scheduleInformation", [])
-        return [item for item in result if isinstance(item, dict)]
+        """分批查询会议室忙闲，钉钉 API 对单次 roomIds 数量有限制。"""
+        results: list[dict[str, Any]] = []
+        batch_size = 20
+        for i in range(0, len(room_ids), batch_size):
+            batch = room_ids[i : i + batch_size]
+            body = await self._request(
+                "POST",
+                f"/v1.0/calendar/users/{union_id}/meetingRooms/schedules/query",
+                json={"roomIds": batch, "startTime": start_time, "endTime": end_time},
+            )
+            result = body.get("result")
+            if not isinstance(result, list):
+                result = body.get("scheduleInformation", [])
+            results.extend(item for item in result if isinstance(item, dict))
+        return results
 
     async def create_schedule(
         self,
@@ -147,6 +153,23 @@ class DingTalkMeetingClient:
             "DELETE",
             f"/v1.0/calendar/users/{union_id}/calendars/{calendar_id}/events/{event_id}",
         )
+
+    async def get_user_work_place(self, user_id: str) -> str | None:
+        """查钉钉用户办公地（work_place），用于会议室按地区排序。"""
+
+        token = await self.get_access_token()
+        try:
+            async with httpx.AsyncClient(timeout=30, trust_env=False) as client:
+                response = await client.post(
+                    f"{self.config.api_base_url.rstrip('/')}/topapi/v2/user/get",
+                    params={"access_token": token},
+                    json={"userid": user_id},
+                )
+                response.raise_for_status()
+                result = response.json().get("result", {})
+                return result.get("work_place") or None
+        except (httpx.HTTPError, ValueError):
+            return None
 
     async def _request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
         token = await self.get_access_token()
@@ -199,6 +222,8 @@ def validate_time_range(start_time: str, end_time: str) -> tuple[str, str]:
     end = _parse_time(end_time)
     if end <= start or start < shanghai_now():
         raise DingTalkMeetingError("INVALID_TIME_RANGE", "会议时间必须晚于当前时间且结束时间晚于开始时间")
+    if start.date() != end.date():
+        raise DingTalkMeetingError("INVALID_TIME_RANGE", "会议开始和结束必须在同一天")
     if end - start > timedelta(hours=8):
         raise DingTalkMeetingError("INVALID_TIME_RANGE", "单次会议不能超过 8 小时")
     return start.isoformat(), end.isoformat()
@@ -209,6 +234,42 @@ def _is_busy(item: dict[str, Any]) -> bool:
     return bool(schedules)
 
 
+def _normalize_room(raw: dict[str, Any]) -> dict[str, Any]:
+    """将钉钉原始房间字段标准化为统一格式，便于过滤和展示。
+
+    钉钉 API 返回：roomId, roomName, roomCapacity, roomLocation(dict),
+    roomLabels(list of {labelId, labelName}), roomGroup(dict with groupName)。
+    """
+    labels = raw.get("roomLabels") or raw.get("equipment") or []
+    equipment = []
+    for label in labels:
+        if isinstance(label, dict):
+            name = label.get("labelName") or label.get("name")
+            if name:
+                equipment.append(name)
+        elif isinstance(label, str):
+            equipment.append(label)
+
+    location_obj = raw.get("roomLocation") or {}
+    if isinstance(location_obj, dict):
+        location = location_obj.get("title") or location_obj.get("desc") or ""
+    else:
+        location = str(location_obj) if location_obj else ""
+
+    group = raw.get("roomGroup") or {}
+    building = group.get("groupName") if isinstance(group, dict) else None
+
+    return {
+        "roomId": str(raw.get("roomId") or raw.get("room_id") or raw.get("id") or ""),
+        "roomName": raw.get("roomName") or raw.get("room_name") or raw.get("name") or "未命名会议室",
+        "capacity": int(raw.get("roomCapacity") or raw.get("capacity") or 0),
+        "location": location or raw.get("location") or "",
+        "building": building or raw.get("building"),
+        "floor": str(raw.get("floor")) if raw.get("floor") else None,
+        "equipment": equipment,
+    }
+
+
 class MeetingRoomService:
     """会议室查询、一次确认和补偿流程。"""
 
@@ -217,17 +278,56 @@ class MeetingRoomService:
         self.client = client or DingTalkMeetingClient()
 
     async def search_rooms(
-        self, union_id: str, start_time: str | None = None, end_time: str | None = None
+        self,
+        union_id: str,
+        start_time: str | None = None,
+        end_time: str | None = None,
+        *,
+        capacity: int = 1,
+        building: str | None = None,
+        floor: str | None = None,
+        equipment: list[str] | None = None,
+        user_id: str | None = None,
     ) -> list[dict[str, Any]]:
-        rooms = await self.client.list_meeting_rooms(union_id)
+        raw_rooms = await self.client.list_meeting_rooms(union_id)
+        rooms = [_normalize_room(r) for r in raw_rooms]
+        # 排除已停用楼层
+        rooms = [r for r in rooms if r.get("building") != "已停用"]
+        # 容量过滤
+        rooms = [r for r in rooms if int(r.get("capacity", 0) or 0) >= capacity]
+        # 楼宇过滤（宽松子串匹配 + location 回退）
+        if building:
+            rooms = [
+                r for r in rooms
+                if r.get("building") == building
+                or building in (r.get("building") or "")
+                or building in (r.get("location") or "")
+            ]
+        # 楼层过滤
+        if floor:
+            rooms = [r for r in rooms if str(r.get("floor") or "") == str(floor)]
+        # 设施过滤（全匹配）
+        if equipment:
+            rooms = [
+                r for r in rooms
+                if all(item in (r.get("equipment") or []) for item in equipment)
+            ]
+        # 按用户办公地排序：同地区在前，再按容量升序
+        work_place = await self.client.get_user_work_place(user_id) if user_id else None
+        if work_place:
+            rooms.sort(key=lambda r: (
+                0 if work_place in (r.get("building") or "") or work_place in (r.get("location") or "") else 1,
+                int(r.get("capacity", 0) or 0),
+                r.get("roomName") or "",
+            ))
         if not start_time or not end_time:
             return rooms
         normalized_start, normalized_end = validate_time_range(start_time, end_time)
-        room_ids = [str(item.get("roomId") or item.get("room_id") or item.get("id")) for item in rooms]
+        room_ids = [str(r.get("roomId")) for r in rooms if r.get("roomId")]
         availability = await self.client.query_room_availability(union_id, room_ids, normalized_start, normalized_end)
         busy = {str(item.get("roomId") or item.get("room_id")) for item in availability if _is_busy(item)}
         return [
-            {**room, "available": str(room.get("roomId") or room.get("room_id") or room.get("id")) not in busy}
+            {**room, "available": str(room.get("roomId")) not in busy}
             for room in rooms
         ]
 
@@ -253,7 +353,7 @@ class MeetingRoomService:
         if room.get("available") is False:
             raise DingTalkMeetingError("ROOM_ALREADY_BOOKED", "会议室在该时间段已被预订")
         token = secrets.token_urlsafe(32)
-        expires_at = shanghai_now() + timedelta(minutes=10)
+        expires_at = shanghai_now() + timedelta(minutes=5)
         payload = {
             "room_id": room_id,
             "room_name": room_name or room.get("roomName") or room.get("name") or room_id,
@@ -286,7 +386,7 @@ class MeetingRoomService:
             raise DingTalkMeetingError("CONFIRM_TOKEN_EXPIRED", "确认令牌已过期，请重新选择会议室")
         payload = dict(confirmation.booking_payload or {})
         start_time, end_time = validate_time_range(payload["start_time"], payload["end_time"])
-        availability = await self.client.query_room_availability(uid, [payload["room_id"]], start_time, end_time)
+        availability = await self.client.query_room_availability(payload["union_id"], [payload["room_id"]], start_time, end_time)
         if any(_is_busy(item) for item in availability):
             raise DingTalkMeetingError("ROOM_ALREADY_BOOKED", "会议室刚刚被其他人预订，请重新选择")
 
@@ -438,3 +538,61 @@ async def cleanup_expired_booking_confirmations(ctx: dict[str, Any] | None = Non
         )
         await db.commit()
         return result.rowcount or 0
+
+
+async def compensate_stale_bookings(ctx: dict[str, Any] | None = None) -> int:
+    """周期补偿卡死的会议室预订：CANCEL_PARTIAL 重试取消，CREATING 超时回滚。
+
+    - CANCEL_PARTIAL：取消房间或删除日程部分失败，重试两端操作直到成功。
+    - CREATING：创建中超过 10 分钟仍未完成，标记 FAILED 并清理可能创建的日程。
+    """
+    del ctx
+    from yuxi.storage.postgres.manager import pg_manager
+
+    client = DingTalkMeetingClient()
+    compensated = 0
+    async with pg_manager.get_async_session_context() as db:
+        # CANCEL_PARTIAL：重试取消
+        result = await db.execute(
+            select(RoomBooking).where(RoomBooking.status == "CANCEL_PARTIAL").limit(20)
+        )
+        for booking in result.scalars().all():
+            try:
+                if booking.schedule_id and booking.calendar_id:
+                    try:
+                        await client.cancel_room(
+                            booking.union_id, booking.room_id, booking.calendar_id, booking.schedule_id
+                        )
+                    except DingTalkMeetingError:
+                        pass
+                    try:
+                        await client.delete_schedule(booking.union_id, booking.calendar_id, booking.schedule_id)
+                    except DingTalkMeetingError:
+                        pass
+                booking.status = "CANCELLED"
+                booking.updated_at = utc_now_naive().isoformat()
+                compensated += 1
+            except Exception:
+                pass
+
+        # CREATING 超时：超过 10 分钟视为卡死
+        stale_threshold = (shanghai_now() - timedelta(minutes=10)).isoformat()
+        result2 = await db.execute(
+            select(RoomBooking).where(
+                RoomBooking.status == "CREATING",
+                RoomBooking.created_at < stale_threshold,
+            ).limit(20)
+        )
+        for booking in result2.scalars().all():
+            if booking.schedule_id and booking.calendar_id:
+                try:
+                    await client.delete_schedule(booking.union_id, booking.calendar_id, booking.schedule_id)
+                except DingTalkMeetingError:
+                    pass
+            booking.status = "FAILED"
+            booking.error_message = "CREATING 状态超时，已自动回滚"
+            booking.updated_at = utc_now_naive().isoformat()
+            compensated += 1
+
+        await db.commit()
+    return compensated

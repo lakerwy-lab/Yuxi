@@ -21,8 +21,9 @@
 - 统一产品展示名为“智能助手”，根路径跳转对话页，并复用 rag-agent 的 KnowledgeMark 品牌图标与 favicon。
 - 修复钉钉 OAuth PC/H5 用户查询请求遗漏 headers 参数导致回调返回 500 的问题，并补充请求参数回归测试。
 - 完成钉钉通讯录同步：递归拉取部门和分页成员，保留多部门关系并投影真实部门树；支持限流重试、周期任务、失败保留旧快照和本地账号隔离，同步入口及状态统计归入用户管理。
-- 完成知识库表单问答对：支持搜索、筛选、分页、Markdown 可视化编辑、工具栏图片上传及全生命周期管理；通过持久化任务写入同一 Milvus 集合，高置信命中直接返回 Markdown 原文，合成文件不进入普通文档与图谱抽取链路。
-- 落地其余 rag-agent 业务迁移链路：会议室 Skill（一次确认和失败补偿）、转人工/统计、文档分析 Skill，以及知识库迁移 dry-run 与显式导入管理页；修复无参数会议预订工具暴露内部运行时、导致智能体初始化失败的问题；只读 SQL 继续延期。
+- 完成知识库表单问答对：支持搜索、筛选、分页、Markdown 可视化编辑、工具栏图片上传及全生命周期管理；问答对按 Yuxi QA 分块策略写入 Milvus（content 为 `问题：xxx\t回答：yyy`，问题与答案均参与向量相似度计算），合成文件不进入普通文档与图谱抽取链路。检索不再走 QA 门控/短路，与文档统一按相似度排序。修复编辑器工具栏图片上传被 `overflow:hidden` 裁剪的问题，改为用 `NormalToolbar` 自定义工具栏图片按钮，点击直接上传并在光标位置插入，不再走出下拉菜单。
+- 落地其余 rag-agent 业务迁移链路：会议室 Skill（一次确认和失败补偿）、转人工/统计、文档分析 Skill；修复无参数会议预订工具暴露内部运行时、导致智能体初始化失败的问题；只读 SQL 继续延期。知识库内容迁移改为一次性脚本（`scripts/migrate_rag_agent_knowledge.py`），从 rag-agent MinIO 取原文件走 Yuxi 重新解析、问答对直接搬数据，删除原 dry-run/manifest 管理页面。
+- 修复钉钉会议室预订多项缺陷：confirm_booking 重查忙闲改用 union_id 修复 TOCTOU 失效；confirmToken TTL 缩短至 300s 并加同一天校验；search_meeting_rooms 加回容量/楼宇/楼层/设施过滤参数并用 `InjectedToolArg` 标注修复 runtime 注入；房间字段标准化（roomCapacity→capacity、roomLabels→equipment、roomGroup→building）对齐 rag-agent；忙闲查询分批 20 个避免钉钉 API 数量限制；新增用户办公地排序（按 work_place 匹配 building 优先展示）和 CANCEL_PARTIAL/CREATING 后台补偿 cron。
 - 完成 rag-agent 设计 Token 第一阶段迁移：Yuxi 主色、语义色、中性色和阴影改为墨绿色体系，暗色模式同步覆盖；侧栏与会话区统一为 264px/820px，顶栏使用可适配双主题的毛玻璃样式，并完成亮暗模式页面回归。
 - 接入 rag-agent 钉钉原生 OAuth：复用现有 OIDC 登录页入口，新增 PC 扫码、H5 免登、用户自动建档/复用与 JWT 交接；保留通用 OIDC，未配置钉钉凭据时不改变原有登录行为。
 - 收窄知识库状态边界：读取模型统一收口至 `read_models.py`；创建、列表、详情与更新由 Manager 统一返回 `KnowledgeBaseSummary/Detail`，Router 只转换 HTTP 响应；Manager 协调查询配置、主记录与聚合统计，Repository 在行锁内合并统计投影；executor 接收 frozen `KnowledgeBaseConfig`，负责类型资源、文档操作与类型专属一致性检测，不再写知识库主记录。

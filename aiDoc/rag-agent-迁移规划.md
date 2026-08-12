@@ -1,10 +1,11 @@
 # rag-agent → Yuxi 迁移规划（方向 A）与设计 Token 迁移方案
 
-> 文档日期：2026-08-11
-> 状态：设计 Token、钉钉登录、通讯录同步和表单问答对已实现并完成真实验证；源知识库数据导入仍受外部依赖闸门约束。
+> 文档日期：2026-08-12
+> 状态：钉钉登录、通讯录同步、知识库内容导入、表单问答对和文档/图片分析已实现并完成真实验证；会议室预订 Skill 后端已完成（含 1 个 P0 缺陷）；设计 Token Step 1-4 已完成、Step 5 待修复；转人工统计前端、管理员通讯录提升和只读 SQL Skill 未完成。
 > 2026-08-11 审查修订：对照 rag-agent 代码逐条核对，修正 3.1（删"启动时同步"+补 departments 加列+保留快照表+3 条红线）、3.2（QA 改"编辑即发布"+返原文改"控制流短路"+砍 revision+不保留 20 短语黑名单）、3.3（补图片 URL 第四种+document_assets 三列唯一键+两张表 ID 格式不同+embedding_model_id 一起导出+csv/json 无存量）、3.5（确认交互改方式 2 ask_user_question+app 级 token 新写+补房间翻页+相对日期解析坑）
 > 2026-08-11 代码审查：对照 GPT 已实现代码逐模块审查 + 浏览器实测 + git stash 对比，发现 1 个阻塞性 bug（agent run 失败 CallableSchema）+ 8 个 P0 功能性缺陷 + 若干偏差。详见第七章"已实现代码审查记录"，Checklist 已据实修正。
 > 2026-08-11 二次执行审查：发现并修正 6 个阻塞问题——目录快照表模型不完整、钉钉身份缺少 corp 隔离、`create_all` 不能迁移已有表、同步锁不能只靠进程内锁、QA 索引缺少可恢复的一致性边界、知识库导入缺少只读预检闸门；会议预订改为一次用户确认，不增加二次审批。只读 SQL 工具继续延期，不在本轮实现。
+> 2026-08-12 执行审查：对照实际代码逐模块核实迁移完成度。知识库内容导入已完成（5 文档 + 37 QA 通过一次性脚本导入，QA 按 Yuxi QA 分块策略写入 Milvus，content 含问题+答案，不走门控/短路）。表单问答对检索链路调整为 QA 与文档统一走 agent 正常检索（删除 filter_qa_pair_hits 门控 + chat_service QA 短路），QA 和文档分库存放。会议室预订前端卡片不作为缺失项（规划 3.5 确认交互用 ask_user_question，工具结果走通用渲染即可）。
 
 ### 0.1 本轮执行口径
 
@@ -21,10 +22,10 @@
 - [x] `ensure_business_schema()` 显式补齐已有 `users` 表字段和唯一索引；定向认证、schema、权限回归测试通过。
 - [x] 完成通讯录分页快照、跨进程 advisory lock、失败任务回收、主表增量投影和管理员查询接口；worker 已注册同步任务。
 - [x] 完成会议室 Skill/API：app 级 token、房间翻页、一次用户确认、幂等预订、日程补偿删除、取消部分失败状态和确认令牌清理任务。
-- [x] 完成 QA 对持久化索引/可恢复任务、Agent 运行前精确命中短路、图片 URL 规范化、转人工记录/通知接口、统计 API 和管理员页面。
-- [x] 完成知识库迁移只读 manifest、目标 embedding 预检、checksum 幂等导入入口和管理员页面；导入统一走 Yuxi MinIO/解析/索引链路。
+- [x] 完成 QA 对持久化索引/可恢复任务、图片 URL 规范化、转人工记录/通知接口、统计 API 和管理员页面。
+- [x] 完成知识库内容导入：一次性脚本 `scripts/migrate_rag_agent_knowledge.py` 从 rag-agent 导入 5 个文档 + 37 条问答对到 Yuxi，文档走 Yuxi 重新解析链路，问答对搬数据并改写图片 URL。已删除 GPT 实现的迁移页面。
 - [x] 已执行真实钉钉通讯录拉取：同步 483 个部门、4954 名成员，快照与主表投影一致。
-- [ ] 尚未执行知识库数据导入：仍需源 PG/MinIO 只读快照和 embedding 预检；不直接复制生产数据。
+- [x] QA 检索链路调整：问答对按 Yuxi QA 分块策略写入 Milvus（content 为 `问题：xxx\t回答：yyy`，问题与答案均参与向量相似度计算），删除 `filter_qa_pair_hits` 门控和 `chat_service` QA 短路，QA 与文档统一走 agent 正常检索；QA 和文档分库存放（文档 → `kb_0i2nbh1bpf`，QA → `kb_ffsjd96uh7`），避免 QA chunk 淹没文档检索结果。
 
 ## 一、背景与决策
 
@@ -235,28 +236,26 @@ access_token 缓存/刷新、退避重试、分页并发、快照事务语义、
 - **无现成导出脚本**（`scripts/` 只有 MySQL→PG 迁移、钉钉 smoke test、RAGFlow smoke test 三个无关脚本），需自行开发。
 - **knowledge-server 物理位置**：`services/knowledge-server`，独立 FastAPI 服务端口 8000，容器名 `rag-knowledge-server`。rag-agent 连接方式 HTTP + Bearer 内部密钥。**两服务共用同一 PG 实例不同库**（knowledge-server 用 `knowledge` 库，rag-agent 用 `rag_agent` 库）+ 同一 MinIO。
 
-#### 3.3.2 迁移方案
+#### 3.3.2 迁移方案（一次性脚本，不做迁移页面）
 
-- **导出侧**（两条路，建议后者批量快照）：
-  1. knowledge-server 内部 API（带校验）：`GET /api/knowledge-bases` → `/documents` → `/documents/{doc_id}/preview`（原始文件）→ `/documents/{doc_id}/chunks`（分页）→ `/assets/{asset_id}`（图片）
-  2. 直连 PG 读 4 张表 + MinIO 取对象（更快，写一次性迁移脚本）
-  - **导出必须按 `documents.active_parse_version` 过滤**：同一图在不同解析版本会重复存（唯一键三列联合），不按 active 过滤会灌入重复/过期 chunk 和图片
-- **导入侧**（先 dry-run，满足外部依赖闸门后才写入 Yuxi）：
-  - 知识库：`knowledge_bases`（名称/描述/**embedding_model_id 关联的模型配置**）→ Yuxi KB（Milvus 集合）；ACL 映射到 Yuxi 知识库共享范围（`none/read/manage`）与 ResourcePermission，`kb_id` UUID 字符串做 ID 翻译
-  - 文档：原始文件传 MinIO 后**优先走 Yuxi 既有解析链路**；只有完成 embedding 模型、分词、chunk 元数据、Milvus metric 和维度预检，且单独验证过回滚/重跑，才允许考虑保留原 chunk 的专用导入路径。
-  - chunks：`content` 保留；源 `embedding`（512 维）不能默认直灌 Yuxi 集合。推荐按目标 embedding 模型重算；若保留原向量，必须使用隔离集合并校验维度、模型、metric、metadata schema，不能让两个向量空间混用。
-  - 图片：`document_assets` + MinIO 对象搬入，**重写正文四种 URL**（含第四种 `/api/v1/internal/knowledge-assets/...`）和 `ragflow_assets.py` 的 `/ragflow/images/{id}` 残留引用；URL 生成复用 Yuxi 现有 MinIO/资源代理，不把固定 `/minio/public/...` 当作通用鉴权方案。
-  - 问答对（`chunk_method=qa_pair` 的合成 chunk）→ 落 3.2 的 `qa_pairs` 表
-- **dry-run 产物**：按 KB 生成 manifest（文档数、chunk 数、资源数、ACL、embedding_model_id、维度、checksum、预计容量）和阻塞项；dry-run 不写目标 PG、MinIO、Milvus。
-- **正式分批执行**：仅在 manifest 审核通过、源库已做只读快照/备份、目标模型已确认后，按 KB 导入，使用 `sync_runs` 式进度表 + 失败重试 + 幂等（checksum 去重），每批完成后做数量、checksum、抽样检索和图片访问校验。
+- **核心决策**：迁移是一次性操作，**不做 dry-run/manifest/预检/导入四步流程的管理页面**，改为写一个一次性 Python 脚本放在 `scripts/` 下完成。GPT 已实现的迁移页面（`MigrationAdminView.vue`、`knowledge_migration_service.py`、`knowledge_migration_router.py`、侧边栏"数据迁移"菜单）删除。
+- **脚本做两件事**：
+  1. **知识库文件导入**：从 rag-agent 的 MinIO 取原始文件（pdf/docx），上传到 Yuxi 目标知识库，走 Yuxi 既有解析+索引链路重新解析（不搬原 chunk/embedding，用 Yuxi 的 embedding 模型重新计算向量）
+  2. **问答对导入**：从 rag-agent 的 `qa_pair` + `qa_pair_revision` 表读出已发布的问题/aliases/答案，写入 Yuxi 的 `qa_pairs` 表
+- **数据来源**：直连 rag-agent 的 PG（`knowledge` 库读 documents 表拿原始文件路径 + `rag_agent` 库读 `qa_pair`/`qa_pair_revision` 表）+ MinIO（取原始文件对象）
+- **文档**：从 rag-agent `documents` 表按 `active_parse_version` 过滤，只取最新解析版本的文档；实测存量只有 qa/docx/pdf 三种，脚本只需覆盖 docx/pdf（qa 类型走问答对导入路径）
+- **图片**：文档由 Yuxi 重新解析，解析后的图片自动存入 Yuxi MinIO 并生成 `/minio/public/...` URL，**不需要手动改写旧 URL**（重新解析会生成新的 markdown，不保留旧 chunk content 里的 4 种 URL 写法）
+- **问答对**：读 `qa_pair` 表 status=published 的记录 + 关联 `qa_pair_revision` 表取 `active_revision` 指向的问题/aliases/答案，写入 Yuxi `qa_pairs` 表（`standard_question`/`aliases`/`answer_markdown`/`status='published'`）；问答对答案里的图片 URL 如果是 rag-agent 的 4 种旧格式，需改写为 Yuxi `/minio/public/...` 格式（问答对不走重新解析，是直接搬数据）
+- **embedding**：不搬原 512 维向量，用 Yuxi 目标 KB 的 embedding 模型重新计算（统一向量空间，检索一致）
+- **ACL**：不迁移（rag-agent 的权限模型和 Yuxi 不同，手动在 Yuxi 配置目标 KB 的共享范围即可）
+- **幂等**：按文件 checksum 去重，脚本可重复执行；问答对按 `standard_question` 去重
+- **执行方式**：`docker exec api-dev python scripts/migrate_rag_agent_knowledge.py --target-kb <kb_id>`，在容器内运行以访问 Yuxi 的 PG/Minio/Milvus
 
 #### 3.3.3 关键风险
 
-- **embedding 维度不一致**：rag-agent chunks 是 512 维（Chinese-CLIP-ViT-B-16），Yuxi 默认 bge-m3 是 1024 维，且 **Yuxi 切 embedding 模型会删库重建 Milvus 集合**（`milvus.py:361-376`）。决策：
-  - 方案 a：导入时用目标 KB 的 embedding 模型**重算全部 chunk 向量**（推荐，统一向量空间，检索一致）
-  - 方案 b：保留原 512 维向量建独立集合（不推荐，与平台默认检索割裂）
-- 图片 URL 改写遗漏会导致回答丢图（记忆：Yuxi 已知的丢图根因）。
-- ACL 映射口径（rag-agent 按知识库 public/private + 部门/用户 ACL，需与 Yuxi 共享范围语义对齐）。
+- **embedding 维度不一致**：rag-agent chunks 是 512 维（Chinese-CLIP-ViT-B-16），Yuxi 默认 bge-m3 是 1024 维。**决策：不搬原向量，用 Yuxi 目标 KB 的 embedding 模型重新计算**（统一向量空间，检索一致），规避维度不一致问题。
+- **问答对答案里的图片 URL 需改写**：问答对不走重新解析，是直接搬数据，答案 markdown 里的 rag-agent 4 种图片 URL 要改写为 Yuxi `/minio/public/...` 格式，否则命中 QA 时图片 404。文档不走这条路（文档重新解析会生成新 URL）。
+- **rag-agent PG 连接**：脚本需要连 rag-agent 的 `knowledge` 库和 `rag_agent` 库（或直连 MinIO 取文件），运行环境需能访问这两个库的网络。
 
 ---
 
@@ -503,11 +502,12 @@ Step 5  回归验证：亮/暗双模式，检查知识库卡片、图谱视图�
 
 | 来源（rag-agent） | 落点（Yuxi） |
 |---|---|
-| `knowledge-server` PG `knowledge` 库 4 表（含 `embedding_model_id` 外键）+ MinIO | 一次性迁移脚本（`scripts/`）+ Yuxi `knowledge/manager.py` / Milvus / MinIO |
-| 图片 URL **四种**写法（含 `/api/v1/internal/knowledge-assets/...`） | 重写为 Yuxi `/minio/public/...` 同源地址 |
-| 两张 assets 表（UUID 主键 vs 32hex 主键） | 分别建映射表，按 `active_parse_version` 过滤 |
-| ACL 四表 + 审计表（`kb_id` VARCHAR UUID 翻译） | 映射 Yuxi 知识库共享范围 + ResourcePermission |
-| 实测存量：qa/docx/pdf 三种 | csv/json/xlsx/pptx/md/txt/html 无存量，导入脚本只需覆盖前三种 |
+| `knowledge-server` PG `knowledge` 库 documents 表 + MinIO 原始文件 | 一次性脚本 `scripts/migrate_rag_agent_knowledge.py` → Yuxi `knowledge_base.parse_file` + `index_file` 重新解析 |
+| `rag_agent` 库 `qa_pair` + `qa_pair_revision` 表 | 脚本写入 Yuxi `qa_pairs` 表 |
+| 问答对答案里的 4 种图片 URL | 改写为 Yuxi `/minio/public/...` 格式 |
+| ~~迁移页面~~ | ~~删除~~（一次性操作不需要常驻页面） |
+
+> GPT 已实现的迁移页面（`MigrationAdminView.vue`、`knowledge_migration_service.py`、`knowledge_migration_router.py`、侧边栏"数据迁移"菜单、`migration_api.js`）全部删除，改为一次性脚本。
 
 ### 5.4 管理员权限（3.4）
 
@@ -532,25 +532,26 @@ Step 5  回归验证：亮/暗双模式，检查知识库卡片、图谱视图�
 - [x] 方向 A 已确认（本文档）
 - [x] 2026-08-11 审查修订：对照 rag-agent 代码逐条核对 3.1/3.2/3.3/3.5（见文档顶部修订记录）
 - [x] 2026-08-11 代码审查：对照已实现代码逐模块审查 + 实测验证（见第七章审查记录）
-- [ ] P0：知识库内容导入 dry-run 与显式导入入口（见 3.3）—— **骨架在，但图片 URL 改写/assets 唯一键/ACL 映射/QA 迁移全缺失（见 7.3）**
+- [x] 2026-08-12 执行审查：对照实际代码逐模块核实迁移完成度（见第八章执行结果和第九章审查记录）
+- [x] P0：知识库内容导入（见 3.3，一次性脚本方案）—— 已完成：5 文档 + 37 QA 通过脚本导入，QA 图片 URL 已改写
 - [x] P0：钉钉原生 OAuth 免登接入（PC 扫码 + H5 免登）—— 实测可用
 - [x] P0：钉钉身份数据基础（corp-scoped 身份列 + 3 张快照表 + 显式 schema migration）
 - [x] P0：钉钉目录同步服务（分页、快照事务、跨进程锁、失败回收、周期任务和主表增量投影）
 - [x] P0：钉钉用户/部门同步（快照落库、查询、真实拉取和主表增量投影）
-- [ ] P1：钉钉会议室预订 Skill（一次用户确认 + app 级 token + 房间翻页 + 相对日期解析）—— **confirm 重查忙闲用错身份（uid≠union_id，见 7.4 :289）+ CANCEL_PARTIAL 无补偿 + 前端卡片半残**
-- [ ] P1：管理员权限补钉钉身份绑定（接口继承 superadmin 权限）—— 绑定本地账号有被同步软删风险（见 7.1）
-- [x] P2：表单问答对（持久化索引任务 + Milvus 门控匹配 + 控制流短路返原文 + 可重试补偿）
-- [x] P2：问题升级/转人工（记录、可选钉钉 webhook 通知、失败状态和统计）
-- [x] P2：文档/图片分析（复用 Yuxi OCR/附件权限链路并注册 Skill）
-- [x] P2：统计报表与客服前端页面（QA 统计、迁移/通讯录管理页和权限路由）
-- [ ] 后续：只读 SQL 安全查询 Skill
+- [ ] P1：钉钉会议室预订 Skill —— 后端全链路已完成（一次用户确认 + app 级 token + 房间翻页 + 相对日期解析 + prompt 完整时间戳）；**遗留：confirm_booking 重查忙闲用错身份 uid≠union_id（7.4 :289）+ CANCEL_PARTIAL 无后台补偿 + search 参数砍了过滤 + confirmToken TTL 600s 而非 300s + validate_time_range 未校验同一天**
+- [ ] P1：管理员权限补钉钉身份绑定 —— 钉钉身份列已加，"从通讯录选人提升管理员"交互未实现
+- [x] P2：表单问答对 —— 已完成：持久化索引任务 + QA 按 Yuxi 分块策略写入 Milvus（content 含问题+答案）+ 图片 URL 规范化 + 可重试补偿。检索链路调整为 QA 与文档统一走 agent 正常检索（删除 filter_qa_pair_hits 门控和 QA 短路），QA 和文档分库存放
+- [~] P2：问题升级/转人工 —— 后端已完成（记录接口 + 钉钉 webhook 通知 + 统计 API + Agent 工具），**前端缺失：无"转人工"按钮、无 SSE `qa.escalatable` 处理、`qaPairApi` 缺 `escalate` 方法**
+- [x] P2：文档/图片分析（复用 Yuxi OCR/附件权限链路并注册 Skill）—— `document-analysis` Skill + `ocr_parse_file` 工具已注册
+- [~] P2：统计报表与客服前端页面 —— 后端统计 API 已实现，**前端缺失：QAPairsPanel 无统计数字展示、无转人工记录列表、`qaPairApi.statistics` 定义但无组件调用**
+- [ ] 后续：只读 SQL 安全查询 Skill —— 明确暂缓，不在本轮实现（`mysql-reporter` 是预先存在的独立 Skill，非本次迁移产物）
 - [x] 设计 Token：Step 1 antd 主色
-- [x] 设计 Token：Step 2 base.css 主色系（含暗色）—— **暗色 --main-color/--main-bright 硬编码未跟随（见 7.6）**
+- [~] 设计 Token：Step 2 base.css 主色系（含暗色）—— 亮色已完成，**暗色 `--main-color`/`--main-bright` 硬编码未跟随 `var(--main-700)`（见 7.6）**
 - [x] 设计 Token：Step 3 语义/中性色
 - [x] 设计 Token：Step 4 布局与阴影
-- [ ] 设计 Token：Step 5 双模式回归验证 —— **暗色模式有变量割裂（见 7.6），需实测验证**
+- [ ] 设计 Token：Step 5 双模式回归验证 —— **暗色模式 3 处变量割裂未修复（base.dark.css :23-24 + theme.js :19-21），需修复后实测验证**
 
-> 🚨 **阻塞性问题（7.0）**：GPT 代码引入 `Cannot generate a JsonSchema for core_schema.CallableSchema`，导致整个 agent run 失败（git stash 对比已确认是 GPT 引入的）。**在修复此问题前，所有功能都无法使用，必须优先修复。**
+> ✅ **阻塞性问题（7.0）已修复**：GPT 代码引入的 `Cannot generate a JsonSchema for core_core.CallableSchema` 已解决，agent run 恢复正常。
 
 ---
 
@@ -720,17 +721,113 @@ P2（细节/体验）：
 - 真实环境同步通过：483 个部门、4954 名成员，快照和主表投影数量一致，真实部门名称无哈希占位。
 - Yuxi 共享权限按请求直接读取用户当前部门计算，没有 rag-agent 的 Redis ACL 用户缓存，因此 7.1 所述 `changed_users` 缓存失效在当前架构不适用。
 
-### 8.2 表单问答对（已完成）
+### 8.2 表单问答对（已完成，检索链路已调整）
 
 - 已按知识库补齐搜索、状态筛选、分页、新增、编辑即发布、停用、删除、索引状态和错误展示。
-- 已接入持久化发布任务与真实 Milvus 索引；问题和别名参与向量召回，答案不进入向量文本，高置信命中在 Agent 前直接返回 Markdown 原文。
-- 已移植噪声词归一化、字符重合和分差门控；低置信或歧义命中回退普通文档检索，不返回 QA 合成块。
+- 已接入持久化发布任务与真实 Milvus 索引；QA 按 Yuxi QA 分块策略写入 Milvus，content 为 `问题：{q}\t回答：{a}`，问题与答案均参与向量相似度计算（与 Yuxi 原 QA 分块策略 `qa.py:_to_qa_chunk` 一致），标准问题和每个 alias 分别生成一条 chunk。
+- **检索链路调整（2026-08-12）**：删除 `filter_qa_pair_hits` 门控（`milvus.py aquery`）和 `chat_service` QA 短路，QA 与文档统一走 agent 正常检索，按向量相似度排序。不再设置 QA 优化代码（不走 24 词停用词表 + 0.72 阈值 + 0.10 分差 + 0.82/0.45 信号门）。
+- **QA 和文档分库存放**：文档 → `kb_0i2nbh1bpf`（It运维手册，17 chunk），QA → `kb_ffsjd96uh7`（问答对，81 chunk），避免 QA chunk 数量多时淹没文档检索结果。
 - 问答对合成文件已从普通文档列表、目录统计和文件工具中隐藏，并跳过知识图谱抽取；换版、停用和删除会清理旧索引。
-- 真实 Milvus 验证通过：新增、别名命中、原文返回、换版、旧版移除、合成文件隐藏和删除清理均符合预期。
+- 真实 Milvus 验证通过：文档库检索"如何重置域控密码"返回文档 chunk（零信任系统说明.pdf），不再被 QA 截胡；QA 库检索返回 QA chunk，content 含问题和答案。
 - Yuxi 当前没有文档资产引用表和孤儿资产清理任务，因此 7.2 所述 `_sync_asset_refs` 不适用；图片引用继续随 Markdown/`image_refs` 保存。
 
 ### 8.3 回归结果
 
 - Docker 内后端定向测试 24 项通过。
 - Ruff、前端 ESLint 和 Vite 生产构建通过。
-- 已在浏览器验证“用户管理”的钉钉同步卡片和知识库“问答对”页的列表、筛选及新增编辑弹窗。
+- 已在浏览器验证”用户管理”的钉钉同步卡片和知识库”问答对”页的列表、筛选及新增编辑弹窗。
+
+---
+
+## 九、2026-08-12 执行审查记录
+
+> 审查方式：对照实际代码逐模块核实迁移完成度，5 个子代理并行搜索 + Docker 容器内验证。
+> 本节为第七章审查记录和第八章执行结果的后续，涉及功能完成度时以本节为准。
+
+### 9.0 阻塞性问题已修复
+
+- 7.0 记录的 `Cannot generate a JsonSchema for core_schema.CallableSchema` 已解决，agent run 恢复正常（实测发消息可得到完整回答）。
+
+### 9.1 已完成功能
+
+| 功能 | 规划章节 | 实际状态 |
+|---|---|---|
+| 钉钉原生 OAuth 免登 | 3.5 之外 | ✅ PC 扫码 + H5 免登，实测可用 |
+| 钉钉用户/部门同步 | 3.1 | ✅ 真实拉取 483 部门 + 4954 成员 |
+| 知识库内容导入 | 3.3 | ✅ 一次性脚本导入 5 文档 + 37 QA |
+| 表单问答对 | 3.2 | ✅ 持久化索引 + QA 分块写入 Milvus（含答案），检索链路已调整为统一走 agent 正常检索 |
+| 文档/图片分析 Skill | 2.1 | ✅ `document-analysis` Skill + `ocr_parse_file` 工具已注册 |
+| 设计 Token Step 1-4 | 四 | ✅ antd 主色 + base.css 墨绿系 + 语义/中性色 + 布局/阴影 |
+| 会议室预订 Skill 后端 | 3.5 | ✅ 工具 + 服务 + 数据表 + app 级 token + prompt 时间戳 + ask_user_question 一次确认 |
+
+### 9.2 未完成 / 有缺陷
+
+#### P0：会议室 confirm_booking 身份 bug
+
+- `dingtalk_meeting_service.py:289` 重查忙闲传 `uid`（Yuxi 内部 ID），钉钉 API 需要的是 `union_id`。
+- payload 里存了正确的 `union_id`（:264），唯独 :289 漏了。TOCTOU 重查形同虚设，防重复预订检测失效。
+- 修复方式：`:289` 的 `query_room_availability(uid, ...)` 改为传 `union_id`。
+
+#### P1：管理员从通讯录提升
+
+- 钉钉身份列已加到 `users` 表（`dingtalk_corp_id`/`dingtalk_union_id`/`dingtalk_user_id`），OAuth 登录回填已工作。
+- “从钉钉通讯录选人提升管理员”的前端交互未实现（用户管理页未集成钉钉目录选择器）。
+
+#### P1：会议室 CANCEL_PARTIAL 后台补偿
+
+- `run_worker.py` cron 只有 `cleanup_expired_booking_confirmations`，无 CANCEL_PARTIAL 扫描。
+- CREATING 崩溃后也无回收机制。
+
+#### P2：转人工前端按钮
+
+- 后端接口完整：`POST /qa-pairs/escalate` + `create_escalation` + 钉钉 webhook + `qa_escalations` 表 + Agent `escalate_question` 工具。
+- 前端缺失：无”转人工”按钮、无 SSE `qa.escalatable` 事件处理、`qaPairApi` 缺 `escalate` 方法。
+- 当前只能由 Agent 内部 `escalate_question` 工具间接触发，用户无法主动点”转人工”。
+
+#### P2：统计前端展示
+
+- 后端 `GET /qa-pairs/statistics` 已实现（返回 total/published/index_ready/escalations/escalation_failures）。
+- 前端缺失：`qaPairApi.statistics` 方法已定义但无组件调用，QAPairsPanel 无统计数字展示、无转人工记录列表。
+
+#### P2：设计 Token Step 5 暗色模式
+
+- `base.dark.css:23` `--main-color: #3aa084` 硬编码（应跟随 `var(--main-700)`）。
+- `base.dark.css:24` `--main-bright: #5fb59b` 硬编码。
+- `theme.js:19-21` `colorLink` 用 `var(--main-color)` 字符串，antd ConfigProvider 的 tinycolor 无法解析，链接色派生可能失效。
+- 修复方式：暗色 `--main-color`/`--main-bright` 改为 `var(--main-700)`/`var(--main-bright)` 引用；`colorLink` 系列改为 hex 或与 `colorPrimary` 一致的取值策略。
+
+#### 后续：只读 SQL 安全查询 Skill
+
+- 明确暂缓，不在本轮实现。
+- 代码库中的 `mysql-reporter` 是预先存在的 MySQL 报表 Skill，非本次迁移产物。
+
+### 9.3 会议室预订偏差（非缺失）
+
+| 偏差 | 位置 | 说明 |
+|---|---|---|
+| 工具文件名 | `toolkits/dingtalk.py` | 合并进通用 dingtalk 文件而非独立 `dingtalk_meeting.py`，功能无影响 |
+| app token 独立获取 | `dingtalk_meeting_service.py:44-72` | 与 `dingtalk_auth_service` 各自缓存 token，存在两套缓存，轻微浪费 |
+| confirmToken TTL 600s | `dingtalk_meeting_service.py:256` | 规划要求 300s，拉长 TOCTOU 窗口 |
+| 幂等键公式 | `dingtalk_meeting_service.py:293` | `sha256(uid+confirm_token)` 而非 `sha256(user+room+start+end+token)`，功能等价 |
+| search 参数砍过滤 | `dingtalk.py:16-19` | 只有 start_time/end_time，砍了 title/capacity/building/floor/equipment，>100 房间全返回 |
+| validate_time_range | `dingtalk_meeting_service.py:196-204` | 未校验同一天，23:00→次日 01:00 会被通过 |
+| 前端卡片渲染 | — | **不作为缺失项**：规划 3.5 确认交互用 `ask_user_question`，工具结果走通用 `BaseToolCall.vue` 渲染即可 |
+
+### 9.4 审查结论
+
+```
+已完成（6 项）：
+  钉钉 OAuth 免登、钉钉通讯录同步、知识库内容导入、表单问答对、文档/图片分析 Skill、设计 Token Step 1-4
+
+未完成（7 项，含 1 项暂缓）：
+  P0：会议室 confirm_booking 身份 bug（一行修复）
+  P1：管理员从通讯录提升（前端交互未实现）
+  P1：会议室 CANCEL_PARTIAL 后台补偿 cron
+  P2：转人工前端按钮（后端已完成）
+  P2：统计前端展示（后端已完成）
+  P2：设计 Token Step 5 暗色模式（3 处变量修复）
+  后续：只读 SQL Skill（明确暂缓）
+
+会议室预订后端核心功能已完成，仅遗留 1 个 P0 bug 和若干偏差。
+前端缺失集中在转人工按钮和统计展示，后端接口均已就绪。
+```

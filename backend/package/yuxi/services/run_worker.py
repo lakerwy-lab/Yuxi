@@ -26,7 +26,7 @@ from yuxi.services.dingtalk_directory_service import (
     recover_stale_directory_sync_runs,
     run_directory_sync_job,
 )
-from yuxi.services.dingtalk_meeting_service import cleanup_expired_booking_confirmations
+from yuxi.services.dingtalk_meeting_service import cleanup_expired_booking_confirmations, compensate_stale_bookings
 from yuxi.services.qa_pair_service import process_qa_pair_index_job, retry_pending_qa_index_jobs
 from yuxi.services.input_message_service import restore_chat_input_message
 from yuxi.services.run_queue_service import (
@@ -678,10 +678,11 @@ async def _worker_shutdown(ctx):
 class WorkerSettings:
     functions = [process_agent_run, run_directory_sync_job, process_qa_pair_index_job]
     cron_jobs = [
-        cron(enqueue_due_directory_sync, minute=set(range(60))),
+        cron(enqueue_due_directory_sync, hour=0, minute=5),
         cron(recover_stale_directory_sync_runs, minute={0, 15, 30, 45}),
         cron(retry_pending_qa_index_jobs, minute=set(range(0, 60, 5))),
         cron(cleanup_expired_booking_confirmations, minute={5, 20, 35, 50}),
+        cron(compensate_stale_bookings, minute={10, 40}),
     ]
     max_tries = 2
     retry_jobs = True

@@ -10,8 +10,7 @@ import {
   PanelLeft,
   PanelLeftOpen,
   MessageCirclePlus,
-  Search,
-  RefreshCw
+  Search
 } from 'lucide-vue-next'
 
 import { useConfigStore } from '@/stores/config'
@@ -143,12 +142,6 @@ const mainList = computed(() => {
       path: '/dashboard',
       icon: BarChart3,
       activeIcon: BarChart3
-    })
-    items.push({
-      name: '数据迁移',
-      path: '/migration',
-      icon: RefreshCw,
-      activeIcon: RefreshCw
     })
   }
 

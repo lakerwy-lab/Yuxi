@@ -151,9 +151,9 @@
         <a-form-item required>
           <div class="qa-answer-header">
             <div class="qa-answer-title"><span>*</span>标准答案 <small>Markdown</small></div>
-            <span>使用工具栏图片按钮，或直接粘贴、拖入图片</span>
           </div>
           <MdEditor
+            ref="editorRef"
             v-model="form.answer_markdown"
             class="qa-markdown-editor"
             :theme="themeStore.isDark ? 'dark' : 'light'"
@@ -161,8 +161,23 @@
             preview-theme="github"
             :max-length="20000"
             :show-code-row-number="true"
+            :toolbars="['bold','underline','italic','strikeThrough','-','title','sub','sup','quote','unorderedList','orderedList','task','-','codeRow','code','link',0,'table','mermaid','katex','-','revoke','next','save','=','prettier','pageFullscreen','fullscreen','preview','previewOnly','htmlPreview','catalog','github']"
+            :toolbars-exclude="['image']"
             placeholder="支持标题、列表、链接、表格和图片等 Markdown 格式"
             @on-upload-img="uploadAnswerImages"
+          >
+            <template #defToolbars>
+              <NormalToolbar title="上传图片" @onClick="triggerImageUpload">
+                <ImageIcon :size="14" />
+              </NormalToolbar>
+            </template>
+          </MdEditor>
+          <input
+            ref="imageInputRef"
+            type="file"
+            accept="image/png,image/jpeg,image/gif,image/webp"
+            style="display: none"
+            @change="handleImageInputChange"
           />
           <div class="qa-answer-hint">图片将上传至 MinIO；支持 PNG、JPG、GIF、WebP，单张不超过 5MB。</div>
         </a-form-item>
@@ -176,6 +191,7 @@ import { onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { message, Modal } from 'ant-design-vue'
 import {
   CirclePause,
+  Image as ImageIcon,
   LoaderCircle,
   Pencil,
   Plus,
@@ -183,7 +199,7 @@ import {
   Trash2,
   X
 } from 'lucide-vue-next'
-import { MdEditor } from 'md-editor-v3'
+import { MdEditor, NormalToolbar } from 'md-editor-v3'
 import 'md-editor-v3/lib/style.css'
 import { qaPairApi } from '@/apis/qa_pair_api'
 import { userApi } from '@/apis/user_api'
@@ -195,6 +211,8 @@ const props = defineProps({
 })
 
 const themeStore = useThemeStore()
+const editorRef = ref(null)
+const imageInputRef = ref(null)
 const loading = ref(false)
 const saving = ref(false)
 const items = ref([])
@@ -291,6 +309,30 @@ const uploadAnswerImages = async (files, callback) => {
   }
 }
 
+/** 工具栏图片按钮：点击触发隐藏的 file input。 */
+const triggerImageUpload = () => {
+  imageInputRef.value?.click()
+}
+
+/** 选好文件后上传，通过编辑器 insert 在光标位置插入图片 markdown。 */
+const handleImageInputChange = async (e) => {
+  const file = e.target.files?.[0]
+  if (!file) return
+  e.target.value = ''
+  try {
+    if (!file.type.startsWith('image/')) throw new Error('只能上传图片文件')
+    if (file.size > 5 * 1024 * 1024) throw new Error(`${file.name} 超过 5MB`)
+    const result = await userApi.uploadImage(file)
+    const imageUrl = result.image_url || result.url
+    if (!imageUrl) throw new Error('上传后未返回图片地址')
+    const imgMd = `![${file.name}](${imageUrl})`
+    editorRef.value?.insert(() => ({ targetValue: imgMd, select: false }))
+    message.success('图片已插入')
+  } catch (error) {
+    message.error(error.message || '图片上传失败')
+  }
+}
+
 const save = async () => {
   const standardQuestion = form.standard_question.trim()
   const answerMarkdown = form.answer_markdown.trim()
@@ -370,7 +412,9 @@ onBeforeUnmount(resetPoll)
 
 <style scoped lang="less">
 .qa-pairs-panel {
-  min-height: 460px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
   padding: 22px 24px;
   background: var(--gray-0);
   border: 1px solid var(--gray-150);
@@ -460,12 +504,13 @@ onBeforeUnmount(resetPoll)
 .qa-aliases { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
 .qa-alias-row { display: flex; width: 100%; gap: 8px; }
 .qa-icon-button { display: grid; width: 32px; flex: 0 0 32px; place-items: center; color: var(--gray-600); background: var(--gray-0); border: 1px solid var(--gray-200); border-radius: 7px; cursor: pointer; }
-.qa-answer-header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
-.qa-answer-header > span { color: var(--gray-500); font-size: 12px; }
+.qa-answer-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
 .qa-answer-title { color: var(--gray-800); font-size: 14px; }
 .qa-answer-title span { margin-right: 5px; color: var(--color-error-500); }
 .qa-answer-title small { margin-left: 5px; color: var(--gray-500); font-size: 12px; font-weight: 400; }
-.qa-markdown-editor { height: 480px; overflow: hidden; border: 1px solid var(--gray-200); border-radius: 10px; }
+.qa-markdown-editor { height: 480px; border: 1px solid var(--gray-200); border-radius: 10px; }
+.qa-markdown-editor :deep(.md-editor) { height: 100%; }
+.qa-markdown-editor :deep(.md-editor-content) { overflow-y: auto; }
 .qa-answer-hint { margin-top: 7px; color: var(--gray-500); font-size: 12px; line-height: 1.5; }
 
 :deep(.md-editor) { --md-color: var(--gray-900); --md-bk-color: var(--gray-0); --md-border-color: var(--gray-200); --md-scrollbar-bg-color: var(--gray-100); --md-scrollbar-thumb-color: var(--gray-400); }
