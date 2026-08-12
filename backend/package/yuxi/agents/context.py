@@ -11,7 +11,7 @@ from yuxi.utils.logging_config import logger
 from yuxi.utils.paths import WORKSPACE_AGENT_CONTEXT_FILES
 
 WORKSPACE_AGENTS_PROMPT_MAX_BYTES = 64 * 1024
-DEFAULT_SUMMARY_THRESHOLD_K = 100  # 100K tokens
+DEFAULT_SUMMARY_THRESHOLD_K = 50  # 50K tokens，适配 64K 上下文模型，留余量给系统提示与输出
 DEFAULT_SUMMARY_KEEP_MESSAGES = 10
 DEFAULT_SUMMARY_TOOL_RESULT_TOKEN_LIMIT = 300
 DEFAULT_SUMMARY_L2_TRIGGER_RATIO = 0.4
@@ -246,7 +246,7 @@ class BaseContext:
             "name": "上下文摘要触发阈值 (K)",
             "description": (
                 f"当上下文大小超过该值时，启用摘要功能以优化上下文使用。单位为 K，默认值为 "
-                f"{DEFAULT_SUMMARY_THRESHOLD_K}K。"
+                f"{DEFAULT_SUMMARY_THRESHOLD_K}K，适配 64K 上下文模型。"
             ),
             "type": "number",
             "auth": "admin",

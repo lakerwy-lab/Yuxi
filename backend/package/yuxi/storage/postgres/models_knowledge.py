@@ -41,7 +41,7 @@ class KnowledgeBase(Base):
     mindmap_file_ids = Column(JSON_VALUE)
     mindmap_metadata = Column(JSON_VALUE)
     sample_questions = Column(JSON_VALUE)
-    created_by = Column(String(64))
+    created_by = Column(String(128))  # 存用户 uid，钉钉用户可达 75 字符
     created_at = Column(DateTime(timezone=True), default=utc_now_naive)
     updated_at = Column(DateTime(timezone=True), default=utc_now_naive, onupdate=utc_now_naive)
 
@@ -71,8 +71,8 @@ class KnowledgeFile(Base):
     processing_params = Column(JSON_VALUE)
     is_folder = Column(Boolean, default=False)
     error_message = Column(Text)
-    created_by = Column(String(64))
-    updated_by = Column(String(64))
+    created_by = Column(String(128))  # 存用户 uid，钉钉用户可达 75 字符
+    updated_by = Column(String(128))  # 存用户 uid，钉钉用户可达 75 字符
     created_at = Column(DateTime(timezone=True), default=utc_now_naive)
     updated_at = Column(DateTime(timezone=True), default=utc_now_naive, onupdate=utc_now_naive)
 
@@ -227,7 +227,7 @@ class EvaluationDataset(Base):
     has_gold_chunks = Column(Boolean, default=False)
     has_gold_answers = Column(Boolean, default=False)
     build_metadata = Column(JSON_VALUE)
-    created_by = Column(String(64))
+    created_by = Column(String(128))  # 存用户 uid，钉钉用户可达 75 字符
     created_at = Column(DateTime(timezone=True), default=utc_now_naive)
     updated_at = Column(DateTime(timezone=True), default=utc_now_naive, onupdate=utc_now_naive)
 
@@ -281,7 +281,7 @@ class EvaluationRun(Base):
     completed_items = Column(Integer, default=0)
     started_at = Column(DateTime(timezone=True), default=utc_now_naive, index=True)
     completed_at = Column(DateTime(timezone=True))
-    created_by = Column(String(64))
+    created_by = Column(String(128))  # 存用户 uid，钉钉用户可达 75 字符
 
 
 class EvaluationRunItem(Base):

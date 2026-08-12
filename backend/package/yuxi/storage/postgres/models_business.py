@@ -72,7 +72,7 @@ class User(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     username = Column(String, nullable=False, unique=True, index=True)  # 显示名称
-    uid = Column(String, nullable=False, unique=True, index=True)  # 登录标识
+    uid = Column(String(128), nullable=False, unique=True, index=True)  # 登录标识，钉钉用户为 dingtalk:{corp_id}:{union_id} 可达 75 字符
     phone_number = Column(String, nullable=True, unique=True, index=True)  # 手机号
     dingtalk_corp_id = Column(String(128), nullable=True, index=True)  # 钉钉企业标识
     dingtalk_union_id = Column(String(128), nullable=True)  # 企业内稳定身份标识
@@ -167,7 +167,7 @@ class AgentEnv(Base):
     __tablename__ = "agent_envs"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    uid = Column(String, ForeignKey("users.uid"), nullable=False, unique=True, index=True)
+    uid = Column(String(128), ForeignKey("users.uid"), nullable=False, unique=True, index=True)
     env = Column(JSON, nullable=False, default=dict)
     created_at = Column(DateTime, default=utc_now_naive)
     updated_at = Column(DateTime, default=utc_now_naive, onupdate=utc_now_naive)
@@ -189,7 +189,7 @@ class UserConfig(Base):
     __tablename__ = "user_config"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    uid = Column(String, ForeignKey("users.uid"), nullable=False, unique=True, index=True)
+    uid = Column(String(128), ForeignKey("users.uid"), nullable=False, unique=True, index=True)
     enable_memory = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime, default=utc_now_naive)
     updated_at = Column(DateTime, default=utc_now_naive, onupdate=utc_now_naive)
@@ -225,8 +225,8 @@ class Agent(Base):
     is_default = Column(Boolean, nullable=False, default=False, index=True)
     is_subagent = Column(Boolean, nullable=False, default=False, index=True)
 
-    created_by = Column(String(64), nullable=True, index=True)
-    updated_by = Column(String(64), nullable=True)
+    created_by = Column(String(128), nullable=True, index=True)  # 存用户 uid，钉钉用户可达 75 字符
+    updated_by = Column(String(128), nullable=True)
     created_at = Column(DateTime, default=utc_now_naive)
     updated_at = Column(DateTime, default=utc_now_naive, onupdate=utc_now_naive)
 
@@ -273,8 +273,8 @@ class Skill(Base):
     content_hash = Column(String(128), nullable=True, comment="技能目录内容哈希（内置 skill 安装时计算）")
     share_config = Column(JSON_VALUE, nullable=False, comment="共享权限配置")
     enabled = Column(Boolean, nullable=False, default=True, comment="是否启用")
-    created_by = Column(String(64), nullable=True)
-    updated_by = Column(String(64), nullable=True)
+    created_by = Column(String(128), nullable=True)  # 存用户 uid，钉钉用户可达 75 字符
+    updated_by = Column(String(128), nullable=True)
     created_at = Column(DateTime, default=utc_now_naive)
     updated_at = Column(DateTime, default=utc_now_naive, onupdate=utc_now_naive)
 
@@ -307,7 +307,7 @@ class Conversation(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True, comment="Primary key")
     thread_id = Column(String(64), unique=True, index=True, nullable=False, comment="Thread ID (UUID)")
-    uid = Column(String(64), index=True, nullable=False, comment="UID")
+    uid = Column(String(128), index=True, nullable=False, comment="UID")  # 钉钉用户 uid 可达 75 字符
     # 历史字段名，实际保存的是 Agent.slug。
     agent_id = Column(String(64), index=True, nullable=False, comment="Agent slug (legacy column name: agent_id)")
     title = Column(String(255), nullable=True, comment="Conversation title")
@@ -345,7 +345,7 @@ class SubagentThread(Base):
     __tablename__ = "subagent_threads"
 
     id = Column(Integer, primary_key=True, autoincrement=True, comment="Primary key")
-    uid = Column(String(64), index=True, nullable=False, comment="UID")
+    uid = Column(String(128), index=True, nullable=False, comment="UID")  # 钉钉用户 uid 可达 75 字符
     parent_conversation_id = Column(
         Integer, ForeignKey("conversations.id"), nullable=False, index=True, comment="Parent conversation ID"
     )
@@ -525,7 +525,7 @@ class MessageFeedback(Base):
     message_id = Column(
         Integer, ForeignKey("messages.id"), nullable=False, index=True, comment="Message ID being rated"
     )
-    uid = Column(String(64), nullable=False, index=True, comment="UID who provided feedback")
+    uid = Column(String(128), nullable=False, index=True, comment="UID who provided feedback")
     rating = Column(String(10), nullable=False, comment="Feedback rating: like or dislike")
     reason = Column(Text, nullable=True, comment="Optional reason for dislike feedback")
     created_at = Column(DateTime, default=utc_now_naive, comment="Feedback creation time")
@@ -785,7 +785,7 @@ class APIKey(Base):
     is_enabled = Column(Boolean, nullable=False, default=True)
     last_used_at = Column(DateTime, nullable=True)
 
-    created_by = Column(String(64), nullable=False)
+    created_by = Column(String(128), nullable=False)  # 存用户 uid，钉钉用户可达 75 字符
     created_at = Column(DateTime, default=utc_now_naive)
 
     # 关联
@@ -860,7 +860,7 @@ class AgentRun(Base):
     id = Column(String(64), primary_key=True, comment="Run ID (UUID)")
     conversation_thread_id = Column(String(64), index=True, nullable=False, comment="Conversation thread ID snapshot")
     agent_slug = Column(String(64), index=True, nullable=False, comment="Agent slug")
-    uid = Column(String(64), index=True, nullable=False, comment="UID")
+    uid = Column(String(128), index=True, nullable=False, comment="UID")  # 钉钉用户 uid 可达 75 字符
     status = Column(
         String(32),
         index=True,
@@ -952,7 +952,7 @@ class AgentRunRequest(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True, comment="Primary key")
     request_id = Column(String(64), unique=True, index=True, nullable=False, comment="幂等请求 ID")
-    uid = Column(String(64), nullable=False, comment="UID")
+    uid = Column(String(128), nullable=False, comment="UID")  # 钉钉用户 uid 可达 75 字符
     agent_slug = Column(String(64), nullable=False, comment="Agent slug")
     conversation_thread_id = Column(String(64), nullable=False, comment="Conversation thread ID")
     source = Column(String(32), nullable=False, default="chat", comment="请求来源: chat/agent_call/eval")

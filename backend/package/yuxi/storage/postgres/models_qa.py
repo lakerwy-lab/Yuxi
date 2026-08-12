@@ -32,8 +32,8 @@ class QAPair(Base):
     indexed_aliases = Column(JSON_VALUE, nullable=True)
     content_hash = Column(String(128), nullable=True, index=True)
     index_error = Column(Text, nullable=True)
-    created_by = Column(String(64), nullable=True)
-    updated_by = Column(String(64), nullable=True)
+    created_by = Column(String(128), nullable=True)  # 存用户 uid，钉钉用户可达 75 字符
+    updated_by = Column(String(128), nullable=True)
     created_at = Column(String(64), nullable=False, default=lambda: utc_now_naive().isoformat())
     updated_at = Column(String(64), nullable=False, default=lambda: utc_now_naive().isoformat())
     deleted_at = Column(String(64), nullable=True, index=True)
@@ -89,7 +89,7 @@ class QAEscalation(Base):
     __tablename__ = "qa_escalations"
 
     id = Column(String(64), primary_key=True)
-    uid = Column(String(64), nullable=False, index=True)
+    uid = Column(String(128), nullable=False, index=True)  # 钉钉用户 uid 可达 75 字符
     thread_id = Column(String(64), nullable=True, index=True)
     question = Column(Text, nullable=False)
     context = Column(JSON_VALUE, nullable=True)

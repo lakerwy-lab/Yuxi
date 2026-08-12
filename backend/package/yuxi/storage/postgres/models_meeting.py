@@ -16,7 +16,7 @@ class RoomBooking(Base):
     __tablename__ = "room_bookings"
 
     id = Column(String(64), primary_key=True)
-    uid = Column(String(64), nullable=False, index=True)
+    uid = Column(String(128), nullable=False, index=True)  # 钉钉用户 uid 可达 75 字符
     union_id = Column(String(128), nullable=False, index=True)
     room_id = Column(String(128), nullable=False)
     room_name = Column(String(255), nullable=False)
@@ -48,7 +48,7 @@ class BookingConfirmation(Base):
     id = Column(String(64), primary_key=True)
     token = Column(String(128), nullable=False, unique=True, index=True)
     booking_payload = Column(JSON_VALUE, nullable=False)
-    uid = Column(String(64), nullable=False, index=True)
+    uid = Column(String(128), nullable=False, index=True)  # 钉钉用户 uid 可达 75 字符
     expires_at = Column(String(64), nullable=False)
     used = Column(Boolean, nullable=False, default=False)
     used_at = Column(String(64), nullable=True)
