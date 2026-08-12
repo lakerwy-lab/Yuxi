@@ -280,6 +280,14 @@
           </a-select>
         </a-form-item>
 
+        <!-- 编辑用户时仅超级管理员可改角色 -->
+        <a-form-item v-if="userManagement.editMode && userStore.isSuperAdmin" label="角色" class="form-item">
+          <a-select v-model:value="userManagement.form.role">
+            <a-select-option value="user">普通用户</a-select-option>
+            <a-select-option value="admin">管理员</a-select-option>
+          </a-select>
+        </a-form-item>
+
         <!-- 部门选择器（仅超级管理员可见） -->
         <a-form-item v-if="userStore.isSuperAdmin" label="部门" class="form-item">
           <a-select v-model:value="userManagement.form.departmentId" placeholder="请选择部门">
@@ -677,6 +685,7 @@ const showEditUserModal = (user) => {
     phoneNumber: user.phone_number || '',
     password: '',
     confirmPassword: '',
+    role: user.role || 'user',
     departmentId: user.department_id || null,
     usernameError: '',
     phoneError: ''
@@ -731,8 +740,11 @@ const handleUserFormSubmit = async () => {
     // 根据模式决定创建还是更新用户
     if (userManagement.editMode) {
       // 创建更新数据对象
-      const updateData = {
-        username: userManagement.form.username.trim()
+      const updateData = {}
+
+      // 添加用户名字段（仅在有值时传）
+      if (userManagement.form.username.trim()) {
+        updateData.username = userManagement.form.username.trim()
       }
 
       // 添加手机号字段
@@ -743,6 +755,11 @@ const handleUserFormSubmit = async () => {
       // 超级管理员可以修改部门
       if (userStore.isSuperAdmin && userManagement.form.departmentId) {
         updateData.department_id = userManagement.form.departmentId
+      }
+
+      // 超级管理员可以修改角色
+      if (userStore.isSuperAdmin && userManagement.form.role) {
+        updateData.role = userManagement.form.role
       }
 
       // 如果显示了密码字段并且填写了密码，才更新密码

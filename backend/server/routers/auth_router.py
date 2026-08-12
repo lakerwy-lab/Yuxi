@@ -82,6 +82,7 @@ class UserUpdate(BaseModel):
     phone_number: str | None = None
     avatar: str | None = None
     department_id: int | None = None
+    role: str | None = None
 
 
 class UserProfileUpdate(BaseModel):
@@ -769,6 +770,26 @@ async def update_user(
     if user_data.avatar is not None:
         user.avatar = user_data.avatar
         update_details.append(f"头像: {user_data.avatar or '已清空'}")
+
+    # 角色修改权限控制（只有超级管理员可以修改用户角色）
+    if user_data.role is not None and user_data.role != user.role:
+        if current_user.role != "superadmin":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="只有超级管理员才能修改用户角色",
+            )
+        if user_data.role not in ("user", "admin"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="角色只能设置为普通用户或管理员",
+            )
+        if user.role == "superadmin":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="不能修改超级管理员的角色",
+            )
+        user.role = user_data.role
+        update_details.append(f"角色: {user_data.role}")
 
     # 部门修改权限控制（只有超级管理员可以修改用户部门）
     if user_data.department_id is not None and user_data.department_id != user.department_id:

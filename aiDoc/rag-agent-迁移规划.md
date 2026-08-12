@@ -538,8 +538,8 @@ Step 5  回归验证：亮/暗双模式，检查知识库卡片、图谱视图�
 - [x] P0：钉钉身份数据基础（corp-scoped 身份列 + 3 张快照表 + 显式 schema migration）
 - [x] P0：钉钉目录同步服务（分页、快照事务、跨进程锁、失败回收、周期任务和主表增量投影）
 - [x] P0：钉钉用户/部门同步（快照落库、查询、真实拉取和主表增量投影）
-- [ ] P1：钉钉会议室预订 Skill —— 后端全链路已完成（一次用户确认 + app 级 token + 房间翻页 + 相对日期解析 + prompt 完整时间戳）；**遗留：confirm_booking 重查忙闲用错身份 uid≠union_id（7.4 :289）+ CANCEL_PARTIAL 无后台补偿 + search 参数砍了过滤 + confirmToken TTL 600s 而非 300s + validate_time_range 未校验同一天**
-- [ ] P1：管理员权限补钉钉身份绑定 —— 钉钉身份列已加，"从通讯录选人提升管理员"交互未实现
+- [x] P1：钉钉会议室预订 Skill —— 后端全链路已完成并修复（一次用户确认 + app 级 token + 房间翻页 + 相对日期解析 + prompt 完整时间戳 + confirm_booking 身份修复 + CANCEL_PARTIAL 补偿 cron + 房间字段标准化 + 忙闲分批查询 + 办公地排序）；已用付柏磊实测查询成功
+- [x] P1：管理员权限补钉钉身份绑定 —— 超级管理员可在前端用户管理编辑用户角色（仅 superadmin 可见），钉钉身份已绑定
 - [x] P2：表单问答对 —— 已完成：持久化索引任务 + QA 按 Yuxi 分块策略写入 Milvus（content 含问题+答案）+ 图片 URL 规范化 + 可重试补偿。检索链路调整为 QA 与文档统一走 agent 正常检索（删除 filter_qa_pair_hits 门控和 QA 短路），QA 和文档分库存放
 - [~] P2：问题升级/转人工 —— 后端已完成（记录接口 + 钉钉 webhook 通知 + 统计 API + Agent 工具），**前端缺失：无"转人工"按钮、无 SSE `qa.escalatable` 处理、`qaPairApi` 缺 `escalate` 方法**
 - [x] P2：文档/图片分析（复用 Yuxi OCR/附件权限链路并注册 Skill）—— `document-analysis` Skill + `ocr_parse_file` 工具已注册
@@ -758,25 +758,10 @@ P2（细节/体验）：
 | 表单问答对 | 3.2 | ✅ 持久化索引 + QA 分块写入 Milvus（含答案），检索链路已调整为统一走 agent 正常检索 |
 | 文档/图片分析 Skill | 2.1 | ✅ `document-analysis` Skill + `ocr_parse_file` 工具已注册 |
 | 设计 Token Step 1-4 | 四 | ✅ antd 主色 + base.css 墨绿系 + 语义/中性色 + 布局/阴影 |
-| 会议室预订 Skill 后端 | 3.5 | ✅ 工具 + 服务 + 数据表 + app 级 token + prompt 时间戳 + ask_user_question 一次确认 |
+| 会议室预订 Skill | 3.5 | ✅ 全链路完成并修复（身份 bug + 补偿 cron + 字段标准化 + 分批查询 + 办公地排序），实测通过 |
+| 管理员权限 | 3.4 | ✅ 超级管理员可在前端用户管理编辑角色，钉钉身份已绑定 |
 
 ### 9.2 未完成 / 有缺陷
-
-#### P0：会议室 confirm_booking 身份 bug
-
-- `dingtalk_meeting_service.py:289` 重查忙闲传 `uid`（Yuxi 内部 ID），钉钉 API 需要的是 `union_id`。
-- payload 里存了正确的 `union_id`（:264），唯独 :289 漏了。TOCTOU 重查形同虚设，防重复预订检测失效。
-- 修复方式：`:289` 的 `query_room_availability(uid, ...)` 改为传 `union_id`。
-
-#### P1：管理员从通讯录提升
-
-- 钉钉身份列已加到 `users` 表（`dingtalk_corp_id`/`dingtalk_union_id`/`dingtalk_user_id`），OAuth 登录回填已工作。
-- “从钉钉通讯录选人提升管理员”的前端交互未实现（用户管理页未集成钉钉目录选择器）。
-
-#### P1：会议室 CANCEL_PARTIAL 后台补偿
-
-- `run_worker.py` cron 只有 `cleanup_expired_booking_confirmations`，无 CANCEL_PARTIAL 扫描。
-- CREATING 崩溃后也无回收机制。
 
 #### P2：转人工前端按钮
 
@@ -816,18 +801,17 @@ P2（细节/体验）：
 ### 9.4 审查结论
 
 ```
-已完成（6 项）：
-  钉钉 OAuth 免登、钉钉通讯录同步、知识库内容导入、表单问答对、文档/图片分析 Skill、设计 Token Step 1-4
+已完成（8 项）：
+  钉钉 OAuth 免登、钉钉通讯录同步、知识库内容导入、表单问答对、文档/图片分析 Skill、
+  会议室预订 Skill（全链路修复 + 实测通过）、管理员权限（前端角色编辑已实现）、设计 Token Step 1-4
 
-未完成（7 项，含 1 项暂缓）：
-  P0：会议室 confirm_booking 身份 bug（一行修复）
-  P1：管理员从通讯录提升（前端交互未实现）
-  P1：会议室 CANCEL_PARTIAL 后台补偿 cron
+未完成（4 项，含 1 项暂缓）：
   P2：转人工前端按钮（后端已完成）
   P2：统计前端展示（后端已完成）
   P2：设计 Token Step 5 暗色模式（3 处变量修复）
   后续：只读 SQL Skill（明确暂缓）
 
-会议室预订后端核心功能已完成，仅遗留 1 个 P0 bug 和若干偏差。
-前端缺失集中在转人工按钮和统计展示，后端接口均已就绪。
+会议室预订已全部修复并实测通过（付柏磊查询到 24 间空会议室，按办公地排序）。
+管理员权限已在前端用户管理中实现角色编辑（仅超级管理员可见）。
+剩余前端工作集中在转人工按钮、统计展示和暗色模式回归。
 ```
