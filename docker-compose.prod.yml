@@ -43,6 +43,7 @@ services:
       - ./docker/volumes/yuxi:/app/saves
       - ./docker/volumes/models:/app/models
       - ./backend/scripts:/app/scripts
+      - /var/run/docker.sock:/var/run/docker.sock
     extra_hosts:
       - "host.docker.internal:host-gateway"
     env_file:
@@ -81,6 +82,7 @@ services:
     volumes:
       - ./docker/volumes/yuxi:/app/saves
       - ./docker/volumes/models:/app/models
+      - /var/run/docker.sock:/var/run/docker.sock
     extra_hosts:
       - "host.docker.internal:host-gateway"
     env_file:
