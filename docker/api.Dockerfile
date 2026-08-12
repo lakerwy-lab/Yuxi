@@ -1,6 +1,6 @@
 # 使用轻量级Python基础镜像
 FROM python:3.13-slim
-COPY --from=ghcr.io/astral-sh/uv:0.11.26 /uv /uvx /bin/
+COPY --from=m.daocloud.io/ghcr.io/astral-sh/uv:0.11.26 /uv /uvx /bin/
 COPY --from=node:24-slim /usr/local/bin /usr/local/bin
 COPY --from=node:24-slim /usr/local/lib/node_modules /usr/local/lib/node_modules
 COPY --from=node:24-slim /usr/local/include /usr/local/include
@@ -52,7 +52,7 @@ COPY backend/uv.lock /app/uv.lock
 COPY backend/package /app/package
 
 # 如果网络还是不好，可以在后面添加 --index-url https://pypi.tuna.tsinghua.edu.cn/simple
-RUN uv sync --no-cache --group test --no-dev --frozen
+RUN uv sync --no-cache --group test --no-dev --frozen --index-url https://pypi.tuna.tsinghua.edu.cn/simple
 
 # 复制 server 代码
 COPY backend/server /app/server
