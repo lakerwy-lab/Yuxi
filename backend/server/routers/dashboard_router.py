@@ -1089,10 +1089,10 @@ async def get_user_messages(
                 username=row[2] or row[1],
                 question=row[3][:1000],
                 answer=answers.get(row[0], "")[:500],
-                agent_id=row[5] or "",
-                conversation_title=row[6] or "",
-                created_at=ensure_shanghai(row[7]).strftime("%Y-%m-%d %H:%M:%S") if row[7] else "",
-                feedback=row[8],
+                agent_id=row[4] or "",
+                conversation_title=row[5] or "",
+                created_at=ensure_shanghai(row[6]).strftime("%Y-%m-%d %H:%M:%S") if row[6] else "",
+                feedback=row[7],
             )
             for row in rows
         ]

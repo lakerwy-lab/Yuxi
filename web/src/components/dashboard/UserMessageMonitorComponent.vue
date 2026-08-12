@@ -1,14 +1,16 @@
 <template>
-  <div class="user-message-monitor">
-    <div class="monitor-header">
-      <h3 class="monitor-title">用户问题监控</h3>
-      <div class="monitor-filters">
+  <a-card class="monitor-card" :bordered="false">
+    <template #title>
+      <span class="card-title">用户问题监控</span>
+    </template>
+    <template #extra>
+      <div class="filter-bar">
         <a-input
           v-model:value="filters.keyword"
           placeholder="搜索问题关键词"
           allow-clear
           style="width: 200px"
-          @pressEnter="loadData"
+          @press-enter="onSearch"
           @change="onKeywordChange"
         />
         <a-select
@@ -16,22 +18,22 @@
           placeholder="满意度"
           allow-clear
           style="width: 120px"
-          @change="loadData"
+          @change="onSearch"
         >
           <a-select-option value="like">👍 点赞</a-select-option>
           <a-select-option value="dislike">👎 点踩</a-select-option>
         </a-select>
-        <a-button @click="loadData">查询</a-button>
       </div>
-    </div>
+    </template>
 
     <a-table
       :columns="columns"
       :data-source="tableData"
-      :pagination="pagination"
       :loading="loading"
+      :pagination="pagination"
       row-key="id"
       size="small"
+      :scroll="{ y: 400 }"
       @change="onTableChange"
     >
       <template #bodyCell="{ column, record }">
@@ -42,17 +44,20 @@
         </template>
         <template v-else-if="column.key === 'answer'">
           <a-tooltip :title="record.answer">
-            <span class="text-cell">{{ record.answer || '—' }}</span>
+            <span class="text-cell text-cell-muted">{{ record.answer || '—' }}</span>
           </a-tooltip>
         </template>
         <template v-else-if="column.key === 'feedback'">
-          <span v-if="record.feedback === 'like'" style="color: #52c41a">👍</span>
-          <span v-else-if="record.feedback === 'dislike'" style="color: #ff4d4f">👎</span>
-          <span v-else style="color: #d9d9d9">—</span>
+          <span v-if="record.feedback === 'like'" class="feedback-like">👍</span>
+          <span v-else-if="record.feedback === 'dislike'" class="feedback-dislike">👎</span>
+          <span v-else class="feedback-none">—</span>
+        </template>
+        <template v-else-if="column.key === 'created_at'">
+          <span class="time-cell">{{ record.created_at }}</span>
         </template>
       </template>
     </a-table>
-  </div>
+  </a-card>
 </template>
 
 <script setup>
@@ -62,6 +67,7 @@ import { dashboardApi } from '@/apis/dashboard_api'
 
 const loading = ref(false)
 const tableData = ref([])
+const total = ref(0)
 
 const filters = ref({
   keyword: '',
@@ -73,13 +79,13 @@ const pagination = ref({
   pageSize: 20,
   total: 0,
   showSizeChanger: true,
-  showTotal: (total) => `共 ${total} 条`
+  showTotal: (t) => `共 ${t} 条`
 })
 
 const columns = [
   { title: '用户', dataIndex: 'username', key: 'username', width: 100 },
-  { title: '问题', dataIndex: 'question', key: 'question', ellipsis: true },
-  { title: 'Agent 回答', dataIndex: 'answer', key: 'answer', ellipsis: true, width: 300 },
+  { title: '问题', dataIndex: 'question', key: 'question', ellipsis: true, width: 280 },
+  { title: 'Agent 回答', dataIndex: 'answer', key: 'answer', ellipsis: true, width: 320 },
   { title: '满意', key: 'feedback', width: 60, align: 'center' },
   { title: '时间', dataIndex: 'created_at', key: 'created_at', width: 160 }
 ]
@@ -94,16 +100,23 @@ const loadData = async () => {
       page_size: pagination.value.pageSize
     })
     tableData.value = data
-    // API 没返回总数，用当前条数粗估
-    pagination.value.total = data.length < pagination.value.pageSize
-      ? (pagination.value.current - 1) * pagination.value.pageSize + data.length
-      : (pagination.value.current + 1) * pagination.value.pageSize
+    // API 没返回总数，按当前页是否满页估算
+    const fullPage = data.length === pagination.value.pageSize
+    total.value = fullPage
+      ? pagination.value.current * pagination.value.pageSize + 1
+      : (pagination.value.current - 1) * pagination.value.pageSize + data.length
+    pagination.value.total = total.value
   } catch (error) {
     console.error('加载用户问题列表失败:', error)
     message.error('加载用户问题列表失败')
   } finally {
     loading.value = false
   }
+}
+
+const onSearch = () => {
+  pagination.value.current = 1
+  loadData()
 }
 
 const onTableChange = (pag) => {
@@ -115,10 +128,7 @@ const onTableChange = (pag) => {
 let keywordTimer = null
 const onKeywordChange = () => {
   clearTimeout(keywordTimer)
-  keywordTimer = setTimeout(() => {
-    pagination.value.current = 1
-    loadData()
-  }, 300)
+  keywordTimer = setTimeout(onSearch, 300)
 }
 
 onMounted(() => {
@@ -127,26 +137,20 @@ onMounted(() => {
 </script>
 
 <style scoped lang="less">
-.user-message-monitor {
+.monitor-card {
   margin-top: 24px;
+  background-color: var(--gray-0, #ffffff);
+  border-radius: 8px;
 
-  .monitor-header {
+  .card-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--gray-1000, #1b2421);
+  }
+
+  .filter-bar {
     display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 16px;
-
-    .monitor-title {
-      font-size: 16px;
-      font-weight: 600;
-      color: var(--gray-1000, #1b2421);
-      margin: 0;
-    }
-
-    .monitor-filters {
-      display: flex;
-      gap: 8px;
-    }
+    gap: 8px;
   }
 
   .text-cell {
@@ -157,6 +161,28 @@ onMounted(() => {
     text-overflow: ellipsis;
     white-space: normal;
     word-break: break-all;
+    color: var(--gray-900, #202123);
+  }
+
+  .text-cell-muted {
+    color: var(--gray-500, #909090);
+  }
+
+  .feedback-like {
+    color: var(--color-success-600, #52c41a);
+  }
+
+  .feedback-dislike {
+    color: var(--color-error-600, #ff4d4f);
+  }
+
+  .feedback-none {
+    color: var(--gray-200, #e7e7e4);
+  }
+
+  .time-cell {
+    color: var(--gray-500, #909090);
+    font-size: 13px;
   }
 }
 </style>
