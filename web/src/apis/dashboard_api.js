@@ -128,5 +128,25 @@ export const dashboardApi = {
    */
   getCallTimeseries: (type = 'models', timeRange = '14days') => {
     return apiAdminGet(`/api/dashboard/stats/calls/timeseries?type=${type}&time_range=${timeRange}`)
+  },
+
+  /**
+   * 获取用户问题监控列表
+   * @param {Object} params - 查询参数
+   * @param {string} params.keyword - 关键词搜索
+   * @param {string} params.uid - 用户UID过滤
+   * @param {string} params.feedback - 满意度过滤 (like/dislike)
+   * @param {number} params.page - 页码
+   * @param {number} params.page_size - 每页数量
+   * @returns {Promise<Array>} - 用户问题列表
+   */
+  getUserMessages: (params = {}) => {
+    const queryParams = new URLSearchParams()
+    if (params.keyword) queryParams.append('keyword', params.keyword)
+    if (params.uid) queryParams.append('uid', params.uid)
+    if (params.feedback) queryParams.append('feedback', params.feedback)
+    queryParams.append('page', params.page || 1)
+    queryParams.append('page_size', params.page_size || 20)
+    return apiAdminGet(`/api/dashboard/user-messages?${queryParams.toString()}`)
   }
 }

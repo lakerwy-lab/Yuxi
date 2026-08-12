@@ -50,6 +50,9 @@
       </div>
     </div>
 
+    <!-- 用户问题监控 -->
+    <UserMessageMonitorComponent />
+
     <!-- 反馈模态框 -->
     <FeedbackModalComponent ref="feedbackModal" />
   </div>
@@ -69,6 +72,7 @@ import AgentStatsComponent from '@/components/dashboard/AgentStatsComponent.vue'
 import CallStatsComponent from '@/components/dashboard/CallStatsComponent.vue'
 import StatsOverviewComponent from '@/components/dashboard/StatsOverviewComponent.vue'
 import FeedbackModalComponent from '@/components/dashboard/FeedbackModalComponent.vue'
+import UserMessageMonitorComponent from '@/components/dashboard/UserMessageMonitorComponent.vue'
 
 // 组件引用
 const feedbackModal = ref(null)

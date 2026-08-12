@@ -988,3 +988,116 @@ async def get_call_timeseries_stats(
         logger.error(f"Error getting call timeseries stats: {e}")
         logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Failed to get call timeseries stats: {str(e)}")
+
+
+# =============================================================================
+# 用户问题监控 - 列出用户问题及 Agent 回答和满意度
+# =============================================================================
+
+
+class UserMessageItem(BaseModel):
+    """用户问题监控列表项。"""
+
+    id: int
+    uid: str
+    username: str
+    question: str
+    answer: str
+    agent_id: str
+    conversation_title: str
+    created_at: str
+    feedback: str | None  # like / dislike / None
+
+
+@dashboard.get("/user-messages", response_model=list[UserMessageItem])
+async def get_user_messages(
+    keyword: str | None = None,
+    uid: str | None = None,
+    feedback: str | None = None,
+    page: int = 1,
+    page_size: int = 20,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_superadmin_user),
+):
+    """获取用户问题列表（含 Agent 回答和满意度），超级管理员权限。"""
+
+    from yuxi.storage.postgres.models_business import Conversation, Message, MessageFeedback
+
+    try:
+        # 子查询：每条用户消息后紧跟的第一条 assistant 回答
+        offset = (page - 1) * page_size
+
+        # 基础查询：role='user' 的消息
+        query = (
+            select(
+                Message.id,
+                Conversation.uid,
+                User.username,
+                Message.content,
+                Conversation.agent_id,
+                Conversation.title,
+                Message.created_at,
+                MessageFeedback.rating,
+            )
+            .join(Conversation, Message.conversation_id == Conversation.id)
+            .outerjoin(User, Conversation.uid == User.uid)
+            .outerjoin(MessageFeedback, MessageFeedback.message_id == Message.id)
+            .where(Message.role == "user")
+        )
+
+        if keyword:
+            query = query.filter(Message.content.ilike(f"%{keyword}%"))
+        if uid:
+            query = query.filter(Conversation.uid == uid)
+        if feedback and feedback in ("like", "dislike"):
+            query = query.filter(MessageFeedback.rating == feedback)
+
+        query = query.order_by(Message.created_at.desc()).limit(page_size).offset(offset)
+        results = await db.execute(query)
+        rows = results.all()
+
+        # 批量取每条用户消息的 Agent 回答
+        msg_ids = [row[0] for row in rows]
+        answers: dict[int, str] = {}
+        if msg_ids:
+            conv_ids_subq = (
+                select(Message.conversation_id, Message.id)
+                .where(Message.id.in_(msg_ids))
+            )
+            conv_ids_result = await db.execute(conv_ids_subq)
+            conv_map = {row[1]: row[0] for row in conv_ids_result.all()}
+
+            for msg_id, conv_id in conv_map.items():
+                ans_result = await db.execute(
+                    select(Message.content)
+                    .where(
+                        Message.conversation_id == conv_id,
+                        Message.role == "assistant",
+                        Message.id > msg_id,
+                    )
+                    .order_by(Message.id.asc())
+                    .limit(1)
+                )
+                ans_row = ans_result.first()
+                if ans_row:
+                    answers[msg_id] = str(ans_row[0])[:500]
+
+        return [
+            UserMessageItem(
+                id=row[0],
+                uid=row[1],
+                username=row[2] or row[1],
+                question=row[3][:1000],
+                answer=answers.get(row[0], "")[:500],
+                agent_id=row[5] or "",
+                conversation_title=row[6] or "",
+                created_at=ensure_shanghai(row[7]).strftime("%Y-%m-%d %H:%M:%S") if row[7] else "",
+                feedback=row[8],
+            )
+            for row in rows
+        ]
+
+    except Exception as e:
+        logger.error(f"Error getting user messages: {e}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Failed to get user messages: {str(e)}")
