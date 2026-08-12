@@ -116,8 +116,11 @@ services:
     container_name: sandbox-provisioner
     volumes:
       - ./docker/volumes/yuxi:/app/saves
+      - ./docker/sandbox_provisioner/app.py:/app/app.py:ro
       - ./docker/sandbox_provisioner/sandbox.env:/app/sandbox.env:ro
       - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      - "127.0.0.1:8002:8002"
     networks:
       - app-network
     extra_hosts:
@@ -148,6 +151,9 @@ services:
       - KUBECONFIG_PATH=${KUBECONFIG_PATH:-}
       - THREAD_PVC=${THREAD_PVC:-yuxi-thread}
       - SKILLS_PVC=${SKILLS_PVC:-yuxi-skills}
+    command: >
+      sh -lc "python -c 'import docker' >/dev/null 2>&1 || pip install --no-cache-dir 'docker>=7.1.0';
+      uvicorn app:app --host 0.0.0.0 --port 8002"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8002/health').read()"]
       interval: 10s
