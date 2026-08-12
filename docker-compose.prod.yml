@@ -42,6 +42,7 @@ services:
     volumes:
       - ./docker/volumes/yuxi:/app/saves
       - ./docker/volumes/models:/app/models
+      - ./backend/scripts:/app/scripts
     extra_hosts:
       - "host.docker.internal:host-gateway"
     env_file:
