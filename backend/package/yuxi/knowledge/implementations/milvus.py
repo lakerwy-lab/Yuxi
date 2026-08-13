@@ -633,9 +633,9 @@ class MilvusKB(KnowledgeBase):
     ) -> str:
         """将一条问答对按版本写入 Milvus，写入方式与 Yuxi QA 分块策略一致。
 
-        content 格式为 ``问题：{q}``，仅问题参与向量相似度计算，答案不进入向量，
-        避免 FAQ 场景中答案内容稀释问题语义。标准问题和每个 alias 分别生成一条 chunk，
-        共享同一份答案。
+        content 格式为 ``问题：{q}\\t回答：{a}``，问题与答案均在 content 中参与向量相似度计算，
+        和文档走 QA 分块策略产生的 chunk 行为完全一致，不携带 source_type 门控标记。
+        标准问题和每个 alias 分别生成一条 chunk，共享同一份答案。
         """
 
         file_id = f"{QA_PAIR_FILE_PREFIX}{qa_pair_id}:r{revision}"
@@ -648,9 +648,10 @@ class MilvusKB(KnowledgeBase):
         variants = [v for v in [standard_question, *aliases] if str(v).strip()]
         if not variants:
             variants = [standard_question]
+        answer_text = str(answer or "").strip()
         chunks_payload = []
         for idx, q in enumerate(variants):
-            content = f"问题：{q}"
+            content = f"问题：{q}\t回答：{answer_text}"
             chunks_payload.append(
                 {
                     "chunk_index": idx,
@@ -743,40 +744,6 @@ class MilvusKB(KnowledgeBase):
             if not isinstance(metadata, dict):
                 continue
             metadata["source"] = filenames.get(str(metadata.get("file_id") or ""), "") or "未知来源"
-
-        await self._hydrate_qa_pair_answers(chunks)
-
-    async def _hydrate_qa_pair_answers(self, chunks: list[dict]) -> None:
-        """对 QA 类型 chunk 把答案拼回 content，使向量只索引问题、返回时仍带答案。"""
-
-        qa_ids = sorted(
-            {
-                metadata["qa_pair_id"]
-                for chunk in chunks
-                if (metadata := chunk.get("metadata") or {}).get("source_type") == "qa_pair"
-                and metadata.get("qa_pair_id")
-            }
-        )
-        if not qa_ids:
-            return
-
-        from yuxi.storage.postgres.models_qa import QAPair
-
-        from sqlalchemy import select
-
-        from yuxi.storage.postgres.manager import pg_manager
-
-        async with pg_manager.get_async_session_context() as session:
-            rows = await session.execute(select(QAPair.id, QAPair.answer).where(QAPair.id.in_(qa_ids)))
-            answers = {row[0]: row[1] for row in rows}
-
-        for chunk in chunks:
-            metadata = chunk.get("metadata")
-            if not isinstance(metadata, dict) or metadata.get("source_type") != "qa_pair":
-                continue
-            answer = answers.get(metadata.get("qa_pair_id"))
-            if answer:
-                chunk["content"] = f"{chunk['content']}\t回答：{answer}"
 
     async def _build_file_name_expr(self, kb_id: str, file_name: str | None) -> str | None:
         if not file_name:
