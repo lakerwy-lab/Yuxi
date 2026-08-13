@@ -27,7 +27,6 @@
             <div class="user-info-display">
               <div class="user-menu-username">{{ userStore.username }}</div>
               <div class="user-menu-details">
-                <span class="user-menu-info">ID: {{ userStore.uid }}</span>
                 <span class="user-menu-role">{{ userRoleText }}</span>
               </div>
             </div>

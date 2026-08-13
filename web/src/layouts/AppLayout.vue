@@ -136,7 +136,7 @@ const mainList = computed(() => {
     activeIcon: LibraryBig
   })
 
-  if (userStore.isSuperAdmin) {
+  if (userStore.isAdmin) {
     items.push({
       name: '数据总览',
       path: '/dashboard',

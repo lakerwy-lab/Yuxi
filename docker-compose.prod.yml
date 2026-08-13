@@ -170,7 +170,7 @@ services:
     image: yuxi-web:${YUXI_VERSION:-0.7.1}
     container_name: web-prod
     ports:
-      - "5073:80"
+      - "8080:80"
     depends_on:
       - api
     networks:
