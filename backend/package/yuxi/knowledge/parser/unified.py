@@ -128,14 +128,90 @@ def _parse_data_uri(data_uri: str) -> tuple[bytes, str]:
     return image_data, mime_type
 
 
-def _convert_with_docling(file_path: Path, params: dict | None = None) -> str:
+def _fix_docx_heading_outline_levels(file_path: Path) -> Path:
+    """修正 docx 样式定义中缺失 outlineLvl 的 heading 样式。
+
+    钉钉等第三方工具导出的 docx 可能用自定义样式 ID（如 dingding-heading2），
+    虽然样式名含 "heading" 但样式定义里缺少 outlineLvl，导致 Docling 无法
+    识别标题层级。这里遍历样式表，给所有含 "heading" 但缺 outlineLvl 的样式
+    补上对应层级，输出到临时文件，不修改原文件。
+    """
+    import zipfile
+    from xml.etree import ElementTree as ET
+
+    W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    ET.register_namespace("w", W_NS)
+    ns = {"w": W_NS}
+
+    with zipfile.ZipFile(str(file_path), "r") as zf:
+        styles_xml = zf.read("word/styles.xml")
+
+    root = ET.fromstring(styles_xml)
+    modified = False
+    for style in root.findall("w:style", ns):
+        style_id = style.get(f"{{{W_NS}}}styleId", "")
+        name_el = style.find("w:name", ns)
+        name_val = name_el.get(f"{{{W_NS}}}val", "") if name_el is not None else ""
+
+        # 判断是否 heading 样式（styleId 或 name 含 "heading"）
+        if "heading" not in style_id.lower() and "heading" not in name_val.lower():
+            continue
+
+        pPr = style.find("w:pPr", ns)
+        if pPr is not None and pPr.find("w:outlineLvl", ns) is not None:
+            continue  # 已有 outlineLvl，不处理
+
+        # 从 styleId 或 name 中提取标题级别数字
+        match = re.search(r"(\d)", style_id + " " + name_val)
+        if not match:
+            continue
+        level = int(match.group(1)) - 1  # outlineLvl 是 0-indexed
+
+        # 补 outlineLvl
+        if pPr is None:
+            pPr = ET.SubElement(style, f"{{{W_NS}}}pPr")
+        outline = ET.SubElement(pPr, f"{{{W_NS}}}outlineLvl")
+        outline.set(f"{{{W_NS}}}val", str(level))
+        modified = True
+
+    if not modified:
+        return file_path  # 无需修改，直接用原文件
+
+    # 写到临时文件
+    tmp_path = tempfile.NamedTemporaryFile(suffix=".docx", delete=False)
+    tmp_path.close()
+    with zipfile.ZipFile(str(file_path), "r") as src:
+        with zipfile.ZipFile(tmp_path.name, "w", zipfile.ZIP_DEFLATED) as dst:
+            for item in src.infolist():
+                if item.filename == "word/styles.xml":
+                    dst.writestr(item, ET.tostring(root, xml_declaration=True, encoding="UTF-8"))
+                else:
+                    dst.writestr(item, src.read(item.filename))
+
+    logger.info(f"Fixed heading outlineLvl in docx styles, temp file: {tmp_path.name}")
+    return Path(tmp_path.name)
+
+
+def _convert_with_docling(file_path: Path, params: dict[str, Any] | None = None) -> str:
     """使用 Docling 将 docx/xlsx/pptx 转换为 Markdown。"""
     params = params or {}
     image_bucket, image_prefix = _resolve_image_storage_params(params)
 
+    # docx 预修正：补全缺失的 heading outlineLvl（钉钉等导出工具的问题）
+    actual_path = file_path
+    if file_path.suffix.lower() == ".docx":
+        actual_path = _fix_docx_heading_outline_levels(file_path)
+
     with _docling_converter_lock:
         converter = _get_docling_converter()
-        result = converter.convert(file_path)
+        result = converter.convert(actual_path)
+
+    # 清理临时文件
+    if actual_path != file_path:
+        try:
+            os.unlink(actual_path)
+        except OSError:
+            pass
 
     if result.status.name != "SUCCESS":
         raise RuntimeError(f"Docling 转换失败: {result.status}")
