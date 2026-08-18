@@ -77,6 +77,35 @@ services:
       sandbox-provisioner:
         condition: service_healthy
 
+  dingtalk-channel:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    image: yuxi-api:${YUXI_VERSION:-0.7.1}
+    container_name: dingtalk-channel-prod
+    working_dir: /app
+    networks:
+      - app-network
+    env_file:
+      - .env
+    environment:
+      RUNNING_IN_DOCKER: "true"
+      YUXI_ENV: production
+      PYTHONPATH: /app/package
+      YUXI_API_BASE_URL: http://api:5050/api
+      DINGTALK_CARD_TEMPLATE_ID: ${DINGTALK_CARD_TEMPLATE_ID:-02fcf2f4-5e02-4a85-b672-46d1f715543e.schema}
+    command: uv run --no-sync --no-dev python -m yuxi.channels.dingtalk
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os; os.kill(1, 0)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    depends_on:
+      api:
+        condition: service_healthy
+
   worker:
     build:
       context: .

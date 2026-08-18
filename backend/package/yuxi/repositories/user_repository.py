@@ -39,6 +39,40 @@ class UserRepository:
         result = await db.execute(select(User).where(User.uid == uid))
         return result.scalar_one_or_none()
 
+    async def get_by_dingtalk_identity_with_db(
+        self,
+        db: AsyncSession,
+        *,
+        corp_id: str,
+        user_id: str | None,
+        union_id: str | None,
+    ) -> User | None:
+        """按企业和钉钉身份查找有效用户，优先使用企业内 userId。"""
+
+        if user_id:
+            result = await db.execute(
+                select(User).where(
+                    User.dingtalk_corp_id == corp_id,
+                    User.dingtalk_user_id == user_id,
+                    User.is_deleted == 0,
+                )
+            )
+            user = result.scalar_one_or_none()
+            if user:
+                return user
+
+        if union_id:
+            result = await db.execute(
+                select(User).where(
+                    User.dingtalk_corp_id == corp_id,
+                    User.dingtalk_union_id == union_id,
+                    User.is_deleted == 0,
+                )
+            )
+            return result.scalar_one_or_none()
+
+        return None
+
     async def list_by_uids(self, uids: list[str]) -> list[User]:
         """批量获取指定 uid 的用户。"""
         normalized_uids = sorted({str(uid).strip() for uid in uids if str(uid).strip()})

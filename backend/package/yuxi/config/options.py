@@ -123,6 +123,40 @@ paddleocr_api_opts = Option(
     },
 )
 
+dingtalk_bot_opts = Option(
+    key="dingtalk_bot_opts",
+    name="钉钉机器人",
+    description="配置独立钉钉 Channel 的启用状态、绑定智能体和 Robot Code。",
+    params={
+        "fields": [
+            {
+                "key": "enabled",
+                "label": "启用",
+                "type": "text",
+                "environment": "DINGTALK_CHANNEL_ENABLED",
+                "placeholder": "true / false",
+                "help": "留空时读取 DINGTALK_CHANNEL_ENABLED；修改运行开关后需重启 Channel 服务。",
+            },
+            {
+                "key": "agent_slug",
+                "label": "绑定智能体",
+                "type": "text",
+                "environment": "DINGTALK_BOT_AGENT_SLUG",
+                "placeholder": "default-chatbot",
+                "help": "留空时读取 DINGTALK_BOT_AGENT_SLUG，默认 default-chatbot。",
+            },
+            {
+                "key": "robot_code",
+                "label": "Robot Code",
+                "type": "password",
+                "environment": "DINGTALK_ROBOT_CODE",
+                "sensitive": True,
+                "help": "留空时读取 DINGTALK_ROBOT_CODE，通常等于 client_id。",
+            },
+        ]
+    },
+)
+
 OPTION_DEFINITIONS = {
     option.key: option
     for option in (
@@ -130,6 +164,7 @@ OPTION_DEFINITIONS = {
         mineru_official_api_opts,
         pp_structure_v3_ocr_host_opts,
         paddleocr_api_opts,
+        dingtalk_bot_opts,
     )
 }
 

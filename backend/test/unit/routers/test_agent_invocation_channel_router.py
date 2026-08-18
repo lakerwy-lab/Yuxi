@@ -292,3 +292,120 @@ async def test_channel_does_not_treat_question_interrupt_as_approval(monkeypatch
         )
     assert exc.value.status_code == 409
     assert exc.value.detail["code"] == "ask_user_question_unsupported"
+
+
+@pytest.mark.asyncio
+async def test_dingtalk_delivery_resolves_user_and_uses_server_agent(monkeypatch: pytest.MonkeyPatch):
+    """外部钉钉投递由服务端映射用户和 Agent，Gateway 不能传入 uid。"""
+
+    class BotOptions:
+        async def get(self, db):
+            assert db is not None
+            return {"enabled": "true", "agent_slug": "it-agent", "robot_code": "robot-1"}
+
+    user = SimpleNamespace(uid="user-1", department_id=3)
+
+    class Users:
+        async def get_by_dingtalk_identity_with_db(self, db, **identity):
+            assert db is not None
+            assert identity == {"corp_id": "corp-1", "user_id": "staff-1", "union_id": "union-1"}
+            return user
+
+    calls: dict[str, object] = {}
+
+    async def fake_receive(payload, *, current_user, db):
+        calls.update(payload=payload, user=current_user, db=db)
+        return {"kind": "run", "run_id": "run-1", "status": "dispatched"}
+
+    monkeypatch.setattr(router, "dingtalk_bot_opts", BotOptions())
+    monkeypatch.setattr(router, "UserRepository", Users)
+    monkeypatch.setattr(router, "receive_channel_message", fake_receive)
+
+    result = await router.receive_channel_delivery(
+        router.ChannelDeliveryRequest(
+            account_id="robot-1",
+            tenant_id="corp-1",
+            chat_id="conversation-1",
+            chat_type="group",
+            sender_id="staff-1",
+            sender_union_id="union-1",
+            message_id="message-1",
+            message={"type": "text", "text": "查库存"},
+        ),
+        _gateway=None,
+        db=object(),
+    )
+
+    payload = calls["payload"]
+    assert calls["user"] is user
+    assert payload.agent_slug == "it-agent"
+    assert payload.chat_id == "corp-1:group:conversation-1"
+    assert payload.queue_policy == "steer"
+    assert result["stream_url"] == "/api/agent-invocation/channel/runs/run-1/events"
+    assert result["result_url"] == "/api/agent-invocation/channel/runs/run-1/result"
+
+
+@pytest.mark.asyncio
+async def test_dingtalk_delivery_rejects_unbound_user(monkeypatch: pytest.MonkeyPatch):
+    """未绑定用户不能借助服务凭证创建系统账号 Run。"""
+
+    class BotOptions:
+        async def get(self, _db):
+            return {"enabled": True, "agent_slug": "it-agent", "robot_code": "robot-1"}
+
+    class Users:
+        async def get_by_dingtalk_identity_with_db(self, *_args, **_kwargs):
+            return None
+
+    monkeypatch.setattr(router, "dingtalk_bot_opts", BotOptions())
+    monkeypatch.setattr(router, "UserRepository", Users)
+
+    with pytest.raises(HTTPException) as exc:
+        await router.receive_channel_delivery(
+            router.ChannelDeliveryRequest(
+                account_id="robot-1",
+                tenant_id="corp-1",
+                chat_id="staff-1",
+                chat_type="direct",
+                sender_id="staff-1",
+                message_id="message-1",
+                message={"type": "text", "text": "你好"},
+            ),
+            _gateway=None,
+            db=object(),
+        )
+
+    assert exc.value.status_code == 403
+    assert exc.value.detail == "未在平台绑定钉钉身份"
+
+
+@pytest.mark.asyncio
+async def test_channel_run_scope_rejects_other_account(monkeypatch: pytest.MonkeyPatch):
+    """服务 token 不能跨 Channel 账号读取 Run。"""
+
+    run = SimpleNamespace(
+        id="run-1",
+        source="channel",
+        channel="dingtalk_bot",
+        origin_metadata={"account_id": "robot-1"},
+    )
+
+    class Runs:
+        def __init__(self, _db):
+            pass
+
+        async def get_run(self, run_id):
+            assert run_id == "run-1"
+            return run
+
+    monkeypatch.setattr(router, "AgentRunRepository", Runs)
+
+    with pytest.raises(HTTPException) as exc:
+        await router._require_channel_run(
+            object(),
+            run_id="run-1",
+            channel="dingtalk_bot",
+            account_id="robot-2",
+        )
+
+    assert exc.value.status_code == 404

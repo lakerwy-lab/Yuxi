@@ -62,6 +62,7 @@
 - 知识库卡片补充共享权限标签：参考 Skill / 智能体卡片，在现有类型与嵌入模型标签之外新增共享范围标签（如「只读全局」），与 Agent 卡片保持一致的灰色样式。
 - 收敛 Ruff CI 行为：Pull Request 与 push 到 main 均只检查、不修改仓库内容，发现问题直接标红并提示本地运行 `make format`；工作流仅保留 `contents: read` 权限，不再自动提交或创建修复 PR。
 - 修复正式环境部署三个 blocker：① 钉钉用户 uid `dingtalk:{corp_id}:{union_id}` 可达 75 字符，超过 `users.uid` 等多表 `VARCHAR(64)` 列上限，导致创建对话与更新 Skill 报 `value too long`；统一将所有存 uid 的列与 `created_by`/`updated_by` 改为 `String(128)`（存用户名而非 uid 的 `mcp_servers`/`model_providers`/`config_options` 不变）。② 上下文压缩触发阈值默认 100K，超过 64K 上下文模型上限导致长对话 BadRequestError，`DEFAULT_SUMMARY_THRESHOLD_K` 从 100 改为 50 适配内网模型，已保存配置的智能体不受影响。
+- 钉钉机器人改为独立 `dingtalk-channel` 服务：API 通过服务凭证映射真实用户并校验 Run 归属，Channel 以紧凑 SSE 驱动同一张 AI Card 流式更新，支持游标重连、Result 终态校准、全局限流及单次 Markdown 降级；API lifespan 不再维护钉钉长连接。生产启用时需配置 `YUXI_CHANNEL_GATEWAY_TOKEN`。修复 AI Card `flowStatus` 必须传字符串（int 报 400）；修复 `preview_booking`/`confirm_booking`/`cancel_booking`/`my_bookings` 四个会议室工具的 `runtime` 参数缺少 `InjectedToolArg` 标注导致工具调用报 `missing 1 required positional argument: 'runtime'`。
 
 
 ## v0.7.1 (2026-07-17)

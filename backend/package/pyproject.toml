@@ -24,6 +24,7 @@ dependencies = [
     "colorlog>=6.9.0",
     "dashscope>=1.23.2",
     "deepagents>=0.6.7",
+    "dingtalk-stream>=0.24.3",
     "docling>=2.68.0",
     "docx2txt>=0.9",
     "httpx>=0.27.0",

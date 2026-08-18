@@ -15,6 +15,7 @@ Yuxi 是一个面向 RAG、知识图谱和多智能体工作流的知识库平�
 - `web-dev`：Vue 3 / Vite 前端，挂载 `web/src` 并热重载。
 - `api-dev`：FastAPI API 服务，挂载 `backend/server`、`backend/package` 和测试目录并热重载。
 - `worker-dev`：ARQ worker，执行已经派发的 AgentRun，并负责异常恢复扫描。
+- `dingtalk-channel-dev`：独立维护钉钉 Stream 长连接，通过服务认证的 Delivery/Run HTTP 边界接入 Yuxi，并把正文增量写入 AI Card。
 - `sandbox-provisioner`：为智能体工具执行提供隔离沙盒。
 - `postgres`：业务数据、知识库元数据、请求队列、AgentRun 与 LangGraph checkpoint。
 - `redis`：ARQ 投递、运行事件、取消信号以及跨进程配置和模型缓存。
@@ -40,6 +41,7 @@ Yuxi 是一个面向 RAG、知识图谱和多智能体工作流的知识库平�
 
 - `agents` 定义 LangGraph 智能体体系。`BaseAgent` 是智能体基类，`BaseContext` 是运行上下文；`buildin/chatbot` 和 `buildin/subagent` 放内置智能体；`middlewares` 组合文件系统、Skills、SubAgent、摘要、审批、模型兼容和用量统计；`toolkits` 管理本地工具；`backends` 对接沙盒、知识库和 Skills 文件系统；`skills` 与 `mcp` 管理扩展能力及其运行时加载。
 - `services` 是用例层。智能体主链路重点分为请求接入与排队、Run 生命周期、运行时配置、worker 执行和 SubAgent 调用；聊天历史、附件、工作区、文件预览、评估、认证和观测等跨模块流程也从这里找入口。
+- `channels` 是独立外部消息通道适配层；钉钉实现负责 Stream 协议、消息转换、Run SSE 消费和 AI Card，不直接访问 Yuxi 数据库或 Redis。
 - `repositories` 是 PostgreSQL 访问边界，封装业务对象、知识库元数据、AgentRun、请求队列、Task 和扩展配置查询。路由不应绕过 repository 直接拼装持久化逻辑。
 - `storage/postgres` 管理 SQLAlchemy 模型、业务连接池和 LangGraph checkpoint 连接池。
 - `storage/redis` 管理同步/异步 Redis 客户端和 ARQ 连接参数；业务 key、事件格式和缓存语义留在各自服务中。
@@ -90,6 +92,8 @@ Yuxi 是一个面向 RAG、知识图谱和多智能体工作流的知识库平�
 
 审批或人机输入产生的 resume 请求会从 LangGraph checkpoint 恢复，并创建新的 AgentRun；它不重新进入普通消息 FIFO 接入流程。
 
+钉钉消息由 `dingtalk-channel-dev` 快速 ACK，经服务凭证调用 `/api/agent-invocation/channel/deliveries`；API 负责映射真实用户、解析绑定 Agent 并提交 Run。Channel 只消费其账号作用域内的紧凑 Run SSE，终态通过 Result API 校准后完成 AI Card。FastAPI lifespan 不维护外部 IM 长连接。
+
 ## 架构不变量
 
 - Docker Compose 是开发环境的事实来源。开发时先检查容器、日志和热重载，不默认要求本地裸跑服务。
@@ -103,6 +107,7 @@ Yuxi 是一个面向 RAG、知识图谱和多智能体工作流的知识库平�
 - LITE 模式必须允许跳过知识库、图谱和评估等重依赖能力，新增导入、路由和启动逻辑时要尊重该边界。
 - 沙盒虚拟路径以 `SANDBOX_VIRTUAL_PATH_PREFIX` 为边界，用户可见路径、对象存储 URL 与宿主机真实路径不能混用。
 - 面向用户和外部系统的输入在边界校验；内部服务优先依赖已有类型、事务和仓储约束，避免用静默回退掩盖设计错误。
+- 外部 Channel 不得传入任意 Yuxi uid 或 Agent；用户映射、Agent 绑定和 Run 来源归属必须由 API 服务端校验。
 
 ## 跨切面关注点
 

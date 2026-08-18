@@ -82,6 +82,15 @@
             <SquareTerminal class="icon" :size="18" />
             <span>环境变量</span>
           </div>
+          <div
+            class="sider-item"
+            :class="{ activesec: activeTab === 'dingtalk' }"
+            @click="activeTab = 'dingtalk'"
+            v-if="userStore.isAdmin"
+          >
+            <MessageCircle class="icon" :size="18" />
+            <span>钉钉机器人</span>
+          </div>
         </div>
 
       </div>
@@ -138,6 +147,14 @@
         </div>
         <div
           class="nav-item"
+          :class="{ active: activeTab === 'dingtalk' }"
+          @click="activeTab = 'dingtalk'"
+          v-if="userStore.isAdmin"
+        >
+          钉钉机器人
+        </div>
+        <div
+          class="nav-item"
           :class="{ active: activeTab === 'department' }"
           @click="activeTab = 'department'"
           v-if="userStore.isSuperAdmin"
@@ -173,6 +190,10 @@
             <UserManagementComponent />
           </div>
 
+          <div v-show="activeTab === 'dingtalk'" v-if="userStore.isAdmin">
+            <DingtalkBotSettingsSection />
+          </div>
+
           <div v-show="activeTab === 'department'" v-if="userStore.isSuperAdmin">
             <DepartmentManagementComponent />
           </div>
@@ -193,6 +214,7 @@ import {
   SquareTerminal,
   User,
   Users,
+  MessageCircle,
   X
 } from 'lucide-vue-next'
 import AccountSettingsComponent from '@/components/AccountSettingsComponent.vue'
@@ -202,6 +224,7 @@ import OCRSettingsSection from '@/components/OCRSettingsSection.vue'
 import ApiKeyManagementComponent from '@/components/ApiKeyManagementComponent.vue'
 import UserManagementComponent from '@/components/UserManagementComponent.vue'
 import DepartmentManagementComponent from '@/components/DepartmentManagementComponent.vue'
+import DingtalkBotSettingsSection from '@/components/DingtalkBotSettingsSection.vue'
 
 const props = defineProps({
   visible: {
@@ -228,7 +251,7 @@ const availableTabs = computed(() => {
   const tabs = []
   if (userStore.isLoggedIn) tabs.push('account')
   if (userStore.isAdmin) tabs.push('apiKeys', 'agentEnv')
-  if (userStore.isAdmin) tabs.push('base', 'ocr', 'user')
+  if (userStore.isAdmin) tabs.push('base', 'ocr', 'user', 'dingtalk')
   if (userStore.isSuperAdmin) tabs.push('department')
   return tabs
 })

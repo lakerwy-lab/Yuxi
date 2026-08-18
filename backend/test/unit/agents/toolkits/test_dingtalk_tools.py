@@ -1,8 +1,10 @@
 from yuxi.agents.toolkits.dingtalk import my_bookings
 
 
-def test_my_bookings_exposes_empty_public_schema():
-    """无参数工具不应把内部 ToolRuntime 暴露给模型或前端。"""
-    schema = my_bookings.args_schema.model_json_schema()
+def test_my_bookings_schema_exposes_only_public_fields():
+    """my_bookings 的公开 schema 不应包含内部 ToolRuntime。"""
 
-    assert schema["properties"] == {}
+    schema = my_bookings.args_schema.model_json_schema()
+    properties = schema.get("properties", {})
+    assert "runtime" not in properties
+    assert "status" in properties

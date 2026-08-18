@@ -2,7 +2,7 @@ x-api-worker-env: &api-worker-env
   HOST_IP: ${HOST_IP:-}
   LITE_MODE: ${LITE_MODE:-false}
   RUNNING_IN_DOCKER: "true"
-  YUXI_ENV: ${YUXI_ENV:-development}
+  YUXI_ENV: development
   # DBs and other services
   POSTGRES_URL: ${POSTGRES_URL:-postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-yuxi}}
   REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
@@ -53,7 +53,7 @@ services:
       - ./backend/test:/app/test
       - ./backend/scripts:/app/scripts
       - ./docker/sandbox_provisioner:/app/docker/sandbox_provisioner:ro
-      - ./.env:/app/.env
+      - ./.env.local:/app/.env
       - /var/run/docker.sock:/var/run/docker.sock
       - nltk_data:/root/nltk_data  # 使用命名卷持久化NLTK数据，避免路径展开差异
     ports:
@@ -63,7 +63,7 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     env_file:
-      - .env
+      - .env.local
     # region api_envs
     environment:
       <<: *api-worker-env
@@ -86,6 +86,37 @@ services:
       sandbox-provisioner:
         condition: service_healthy
 
+  dingtalk-channel:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    image: yuxi-api:${YUXI_VERSION:-0.7.1}
+    container_name: dingtalk-channel-dev
+    working_dir: /app
+    volumes:
+      - ./backend/package:/app/package
+    networks:
+      - app-network
+    env_file:
+      - .env.local
+    environment:
+      RUNNING_IN_DOCKER: "true"
+      YUXI_ENV: development
+      PYTHONPATH: /app/package
+      YUXI_API_BASE_URL: http://api:5050/api
+      DINGTALK_CARD_TEMPLATE_ID: ${DINGTALK_CARD_TEMPLATE_ID:-02fcf2f4-5e02-4a85-b672-46d1f715543e.schema}
+    command: uv run --no-sync --no-dev python -m yuxi.channels.dingtalk
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os; os.kill(1, 0)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    depends_on:
+      api:
+        condition: service_healthy
+
   worker:
     build:
       context: .
@@ -101,7 +132,7 @@ services:
       - ./backend/test:/app/test
       - ./backend/scripts:/app/scripts
       - ./docker/sandbox_provisioner:/app/docker/sandbox_provisioner:ro
-      - ./.env:/app/.env
+      - ./.env.local:/app/.env
       - ./backend/pyproject.toml:/app/pyproject.toml
       - ./backend/uv.lock:/app/uv.lock
       - /var/run/docker.sock:/var/run/docker.sock
@@ -110,7 +141,7 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     env_file:
-      - .env
+      - .env.local
     environment:
       <<: *api-worker-env
     command: watchfiles --filter python "arq server.worker_main.WorkerSettings" /app/server /app/package
@@ -354,7 +385,7 @@ services:
     profiles:
       - all
     env_file:
-      - .env
+      - .env.local
     ports:
       - 127.0.0.1:30001:30001
     environment:

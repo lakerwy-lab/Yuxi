@@ -1,4 +1,5 @@
 import hashlib
+import secrets
 
 from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
@@ -6,9 +7,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from yuxi.storage.postgres.manager import pg_manager
 from yuxi.storage.postgres.models_business import APIKey, User
-from yuxi.utils.datetime_utils import utc_now_naive
-
 from yuxi.utils.auth_utils import AuthUtils
+from yuxi.utils.channel_auth import resolve_channel_gateway_token
+from yuxi.utils.datetime_utils import utc_now_naive
 
 # 定义OAuth2密码承载器，指定token URL
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/token", auto_error=False)
@@ -118,6 +119,24 @@ async def get_required_user(user: User | None = Depends(get_current_user)):
             detail="当前用户未绑定部门",
         )
     return user
+
+
+async def require_channel_gateway(authorization: str | None = Header(None)) -> None:
+    """校验独立 Channel Gateway 的服务凭证。"""
+
+    try:
+        expected_token = resolve_channel_gateway_token()
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+
+    prefix = "Bearer "
+    supplied_token = authorization[len(prefix) :].strip() if authorization and authorization.startswith(prefix) else ""
+    if not supplied_token or not secrets.compare_digest(supplied_token, expected_token):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="无效的 Channel Gateway 凭证",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
 
 # 获取管理员用户

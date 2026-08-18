@@ -39,7 +39,9 @@ class MeetingCancelInput(BaseModel):
 
 
 class MyBookingsInput(BaseModel):
-    """“我的会议室预订”不接收模型侧参数。"""
+    """"我的会议室预订"不接收模型侧参数；status 为可选过滤字段。"""
+
+    status: str | None = Field(default=None, description="可选：按状态过滤预订记录，如 confirmed/cancelled")
 
 
 def _runtime_value(runtime: ToolRuntime, key: str) -> str | None:
@@ -118,7 +120,7 @@ async def preview_booking(
     start_time: str,
     end_time: str,
     description: str | None,
-    runtime: ToolRuntime,
+    runtime: Annotated[ToolRuntime, InjectedToolArg],
 ) -> dict[str, Any]:
     """生成一次用户确认所需的预览。"""
     from yuxi.services.dingtalk_meeting_service import MeetingRoomService
@@ -144,7 +146,7 @@ async def preview_booking(
     description="使用用户已经确认的 preview_booking 令牌完成预订；该工具不会再次询问用户。",
     args_schema=MeetingConfirmInput,
 )
-async def confirm_booking(confirm_token: str, runtime: ToolRuntime) -> dict[str, Any]:
+async def confirm_booking(confirm_token: str, runtime: Annotated[ToolRuntime, InjectedToolArg]) -> dict[str, Any]:
     """在一次用户确认后执行日程创建、会议室预订和失败补偿。"""
     from yuxi.services.dingtalk_meeting_service import MeetingRoomService
 
@@ -160,7 +162,7 @@ async def confirm_booking(confirm_token: str, runtime: ToolRuntime) -> dict[str,
     description="取消当前用户的钉钉会议室预订，并在部分失败时保留补偿状态。",
     args_schema=MeetingCancelInput,
 )
-async def cancel_booking(booking_id: str, runtime: ToolRuntime) -> dict[str, Any]:
+async def cancel_booking(booking_id: str, runtime: Annotated[ToolRuntime, InjectedToolArg]) -> dict[str, Any]:
     """取消会议室预订。"""
     from yuxi.services.dingtalk_meeting_service import MeetingRoomService
 
@@ -176,8 +178,11 @@ async def cancel_booking(booking_id: str, runtime: ToolRuntime) -> dict[str, Any
     description="查询当前用户的钉钉会议室预订记录。",
     args_schema=MyBookingsInput,
 )
-async def my_bookings(runtime: ToolRuntime) -> dict[str, Any]:
-    """查询当前用户预订。"""
+async def my_bookings(
+    status: str | None,
+    runtime: Annotated[ToolRuntime, InjectedToolArg],
+) -> dict[str, Any]:
+    """查询当前用户预订，可按状态过滤。"""
     from yuxi.services.dingtalk_meeting_service import MeetingRoomService
 
     user = await _current_dingtalk_user(runtime)
