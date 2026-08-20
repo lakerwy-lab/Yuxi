@@ -16,6 +16,8 @@ Yuxi 是一个面向 RAG、知识图谱和多智能体工作流的知识库平�
 - `api-dev`：FastAPI API 服务，挂载 `backend/server`、`backend/package` 和测试目录并热重载。
 - `worker-dev`：ARQ worker，执行已经派发的 AgentRun，并负责异常恢复扫描。
 - `dingtalk-channel-dev`：独立维护钉钉 Stream 长连接，通过服务认证的 Delivery/Run HTTP 边界接入 Yuxi，并把正文增量写入 AI Card。
+- `mcp-keygen-dev`：普通 Compose 启动时一次性创建或校验持久化 Ed25519 密钥；API/worker 挂载私钥目录，enterprise-mcp 只能挂载公钥目录。
+- `enterprise-mcp-dev`：默认启动的单进程企业 MCP 网关；在 8010 同时发布 `/mcp/meeting` 与 `/mcp/hr`，各域独立校验 audience 和工具白名单，实际调用均要求 API/worker 按真实 AgentRun 与钉钉 userId 签发的短期令牌。新增同信任边界业务域默认注册子应用，不新增容器。
 - `sandbox-provisioner`：为智能体工具执行提供隔离沙盒。
 - `postgres`：业务数据、知识库元数据、请求队列、AgentRun 与 LangGraph checkpoint。
 - `redis`：ARQ 投递、运行事件、取消信号以及跨进程配置和模型缓存。
@@ -47,6 +49,7 @@ Yuxi 是一个面向 RAG、知识图谱和多智能体工作流的知识库平�
 - `storage/redis` 管理同步/异步 Redis 客户端和 ARQ 连接参数；业务 key、事件格式和缓存语义留在各自服务中。
 - `storage/minio` 管理对象上传、下载和临时文件访问。
 - `storage/neo4j` 管理共享 Neo4j Driver、生命周期和图查询辅助。
+- `mcp` 定义企业 MCP 的不可变调用上下文和 Ed25519 短期令牌；`agents/mcp` 负责工具发现与每次调用前的签名注入，不在连接缓存中保存用户令牌。
 - `knowledge` 是知识库、文档解析、评估和图谱领域。`runtime.py` 暴露运行时知识库管理器；`implementations` 放 Milvus、Dify、Notion 和只读连接器；`parser` 统一封装 OCR/文档解析；`chunking` 管理分块策略；`graphs` 管理 Milvus 与 Neo4j 图谱能力。
 - `models` 封装 chat、embedding 和 rerank 模型适配；`models/providers` 使用 PostgreSQL 保存模型供应商，并通过 Redis 缓存向 API 和 worker 提供一致视图。
 - `config` 区分系统级配置和用户级配置。系统配置写入 `base.toml` 并同步 Redis 快照，用户配置保存在 PostgreSQL。
@@ -108,6 +111,7 @@ Yuxi 是一个面向 RAG、知识图谱和多智能体工作流的知识库平�
 - 沙盒虚拟路径以 `SANDBOX_VIRTUAL_PATH_PREFIX` 为边界，用户可见路径、对象存储 URL 与宿主机真实路径不能混用。
 - 面向用户和外部系统的输入在边界校验；内部服务优先依赖已有类型、事务和仓储约束，避免用静默回退掩盖设计错误。
 - 外部 Channel 不得传入任意 Yuxi uid 或 Agent；用户映射、Agent 绑定和 Run 来源归属必须由 API 服务端校验。
+- 企业 MCP 不信任模型参数中的用户身份；API/worker 必须从已持久化 AgentRun 构造独立调用上下文并签发 audience-bound 短期令牌，MCP 服务在 `tools/list` 与 `tools/call` 两层校验允许工具集合。
 
 ## 跨切面关注点
 

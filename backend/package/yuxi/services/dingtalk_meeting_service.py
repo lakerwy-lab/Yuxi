@@ -12,6 +12,7 @@ from typing import Any
 
 import httpx
 from sqlalchemy import delete, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from yuxi.storage.postgres.models_meeting import BookingConfirmation, RoomBooking
@@ -386,7 +387,9 @@ class MeetingRoomService:
             raise DingTalkMeetingError("CONFIRM_TOKEN_EXPIRED", "确认令牌已过期，请重新选择会议室")
         payload = dict(confirmation.booking_payload or {})
         start_time, end_time = validate_time_range(payload["start_time"], payload["end_time"])
-        availability = await self.client.query_room_availability(payload["union_id"], [payload["room_id"]], start_time, end_time)
+        availability = await self.client.query_room_availability(
+            payload["union_id"], [payload["room_id"]], start_time, end_time
+        )
         if any(_is_busy(item) for item in availability):
             raise DingTalkMeetingError("ROOM_ALREADY_BOOKED", "会议室刚刚被其他人预订，请重新选择")
 
@@ -397,7 +400,7 @@ class MeetingRoomService:
             return self._serialize_booking(existing)
         if existing and existing.status != "FAILED":
             raise DingTalkMeetingError("BOOKING_IN_PROGRESS", "该预订正在处理中，请稍后重试")
-        booking_id = f"bk_{secrets.token_hex(8)}"
+        booking_id = existing.id if existing else f"bk_{secrets.token_hex(8)}"
         now = utc_now_naive().isoformat()
         if existing:
             booking = existing
@@ -422,7 +425,18 @@ class MeetingRoomService:
                 updated_at=now,
             )
             self.db.add(booking)
-        await self.db.commit()
+        try:
+            await self.db.commit()
+        except IntegrityError:
+            # 两个进程可能同时通过前置查询；数据库唯一约束是最终幂等边界。
+            await self.db.rollback()
+            conflict_result = await self.db.execute(select(RoomBooking).where(RoomBooking.idempotency_key == idem))
+            conflict = conflict_result.scalar_one_or_none()
+            if conflict is None:
+                raise
+            if conflict.status == "BOOKED":
+                return self._serialize_booking(conflict)
+            raise DingTalkMeetingError("BOOKING_IN_PROGRESS", "该预订正在处理中，请稍后重试") from None
         event_id = ""
         calendar_id = "primary"
         try:

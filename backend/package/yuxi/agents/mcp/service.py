@@ -10,14 +10,24 @@ Responsibilities:
 import asyncio
 import hashlib
 import json
+import os
 import re
 from collections.abc import Callable
 from typing import Any, cast
 
 from langchain_mcp_adapters.client import MultiServerMCPClient
+from langchain_mcp_adapters.sessions import create_session
+from langchain_mcp_adapters.tools import convert_mcp_tool_to_langchain_tool
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from yuxi.agents.mcp.governance import (
+    EnterpriseMcpToolCallInterceptor,
+    build_invocation_context_from_runtime,
+    is_enterprise_mcp_server,
+)
+from yuxi.mcp import McpInvocationContext, McpInvocationTokenSigner
+from yuxi.mcp.governance import enterprise_mcp_audience, enterprise_mcp_tool_names
 from yuxi.storage.postgres.models_business import MCPServer
 from yuxi.utils import logger
 
@@ -45,6 +55,24 @@ _DEFAULT_MCP_SERVERS = {
         "description": "图表生成工具，支持生成各类图表（柱状图、折线图、饼图等）",
         "icon": "📊",
         "tags": ["内置", "图表"],
+    },
+    "meeting": {
+        "name": "企业会议室",
+        "url": os.getenv("YUXI_ENTERPRISE_MCP_URL", "http://enterprise-mcp:8010/mcp/meeting"),
+        "transport": "streamable_http",
+        "description": "使用可信 Xinbo 身份上下文查询和预订钉钉会议室",
+        "icon": "📅",
+        "tags": ["内置", "企业 MCP", "会议室"],
+        "enabled_by_default": True,
+    },
+    "hr": {
+        "name": "HR 考勤查询",
+        "url": os.getenv("YUXI_HR_MCP_URL", "http://enterprise-mcp:8010/mcp/hr"),
+        "transport": "streamable_http",
+        "description": "按可信钉钉 userId 查询当前用户的打卡记录、考勤日明细和考勤汇总",
+        "icon": "👥",
+        "tags": ["内置", "企业 MCP", "HR", "考勤"],
+        "enabled_by_default": True,
     },
 }
 _BUILTIN_MCP_SERVER_SLUGS = tuple(_DEFAULT_MCP_SERVERS)
@@ -153,7 +181,7 @@ async def ensure_builtin_mcp_servers_in_db() -> None:
                             sse_read_timeout=config.get("sse_read_timeout"),
                             tags=config.get("tags"),
                             icon=config.get("icon"),
-                            enabled=0,
+                            enabled=1 if config.get("enabled_by_default") else 0,
                             created_by="system",
                             updated_by="system",
                         )
@@ -163,6 +191,10 @@ async def ensure_builtin_mcp_servers_in_db() -> None:
                     continue
 
                 server_changed = False
+                next_name = config.get("name")
+                if next_name and existing.name != next_name:
+                    existing.name = next_name
+                    server_changed = True
                 for field in _SYNCED_MCP_FIELDS:
                     next_value = config.get(field)
                     if getattr(existing, field) != next_value:
@@ -193,6 +225,59 @@ async def get_mcp_client(
     except Exception as e:
         logger.error("Failed to initialize MCP client: {}", e)
         return None
+
+
+async def _load_enterprise_mcp_tools(
+    server_slug: str,
+    client_config: dict[str, Any],
+    invocation_context: McpInvocationContext,
+    allowed_tools: set[str],
+) -> list[Callable[..., Any]]:
+    """使用短期令牌发现工具，再构造不持有发现令牌的 LangChain 工具。"""
+
+    signer = McpInvocationTokenSigner.from_env()
+    token = signer.issue(
+        invocation_context,
+        audience=enterprise_mcp_audience(server_slug),
+        allowed_tools=allowed_tools,
+    )
+    discovery_config = dict(client_config)
+    discovery_config["headers"] = {
+        **dict(client_config.get("headers") or {}),
+        "Authorization": f"Bearer {token}",
+    }
+
+    descriptors = []
+    async with create_session(discovery_config) as session:
+        await session.initialize()
+        cursor = None
+        while True:
+            page = await session.list_tools(cursor=cursor)
+            descriptors.extend(page.tools)
+            cursor = page.nextCursor
+            if not cursor:
+                break
+
+    base_config = dict(client_config)
+    base_headers = {
+        key: value for key, value in dict(base_config.get("headers") or {}).items() if key.lower() != "authorization"
+    }
+    if base_headers:
+        base_config["headers"] = base_headers
+    else:
+        base_config.pop("headers", None)
+
+    interceptor = EnterpriseMcpToolCallInterceptor(server_slug, allowed_tools)
+    return [
+        convert_mcp_tool_to_langchain_tool(
+            None,
+            descriptor,
+            connection=base_config,
+            tool_interceptors=[interceptor],
+            server_name=server_slug,
+        )
+        for descriptor in descriptors
+    ]
 
 
 def to_camel_case(s: str) -> str:
@@ -258,6 +343,8 @@ async def get_mcp_tools(
     disabled_tools: list[str] = None,
     cache: bool = True,
     force_refresh: bool = False,
+    runtime_context: Any | None = None,
+    invocation_context: McpInvocationContext | None = None,
 ) -> list[Callable[..., Any]]:
     """Get MCP tools for a specific server.
 
@@ -282,6 +369,12 @@ async def get_mcp_tools(
         logger.warning(f"MCP server '{server_slug}' not found in database or disabled")
         return []
 
+    if is_enterprise_mcp_server(server_slug):
+        if invocation_context is None and runtime_context is not None:
+            invocation_context = await build_invocation_context_from_runtime(runtime_context, server_slug=server_slug)
+        if invocation_context is None:
+            raise PermissionError("Enterprise MCP 工具发现缺少可信调用上下文")
+
     # 配置 hash 直接基于完整配置生成。只要数据库中的配置发生变化，
     # 本地工具缓存 key 就会变化，从而自然触发重建。
     config_payload = json.dumps(server_config, sort_keys=True, ensure_ascii=True, separators=(",", ":"))
@@ -299,11 +392,23 @@ async def get_mcp_tools(
             # disabled_tools 只影响返回值过滤，不参与 MCP client 建连参数。
             client_config = {k: v for k, v in server_config.items() if k not in ("disabled_tools",)}
 
-            client = await get_mcp_client({server_slug: client_config})
-            if client is None:
-                return []
-
-            raw_tools = cast(list[Any], await client.get_tools())
+            if is_enterprise_mcp_server(server_slug):
+                globally_disabled = set(server_config.get("disabled_tools") or [])
+                allowed_tools = set(enterprise_mcp_tool_names(server_slug)) - globally_disabled
+                raw_tools = cast(
+                    list[Any],
+                    await _load_enterprise_mcp_tools(
+                        server_slug,
+                        client_config,
+                        invocation_context,
+                        allowed_tools,
+                    ),
+                )
+            else:
+                client = await get_mcp_client({server_slug: client_config})
+                if client is None:
+                    return []
+                raw_tools = cast(list[Any], await client.get_tools())
 
             server_cc = to_camel_case(server_slug)
             for tool in raw_tools:
@@ -342,6 +447,8 @@ async def get_mcp_tools(
 
         except Exception as e:
             logger.exception(f"Failed to load tools from MCP server '{server_slug}': {e}")
+            if is_enterprise_mcp_server(server_slug):
+                raise
             return []
 
     # 3. Filtering (Apply to Return Value Only)
@@ -356,12 +463,21 @@ async def get_mcp_tools(
     return all_processed_tools
 
 
-async def get_tools_from_all_servers() -> list[Callable[..., Any]]:
+async def get_tools_from_all_servers(
+    *, discovery_subject_uid: str = "system-mcp-discovery"
+) -> list[Callable[..., Any]]:
     """Get all tools from all configured MCP servers."""
     server_configs = await _load_enabled_mcp_server_configs()
     all_tools = []
     for server_slug in server_configs:
-        tools = await get_mcp_tools(server_slug, additional_servers=server_configs)
+        invocation_context = None
+        if is_enterprise_mcp_server(server_slug):
+            invocation_context = McpInvocationContext.for_discovery(discovery_subject_uid)
+        tools = await get_mcp_tools(
+            server_slug,
+            additional_servers=server_configs,
+            invocation_context=invocation_context,
+        )
         all_tools.extend(tools)
     return all_tools
 
@@ -610,7 +726,7 @@ async def toggle_tool_enabled(
 # =============================================================================
 
 
-async def get_enabled_mcp_tools(server_slug: str) -> list:
+async def get_enabled_mcp_tools(server_slug: str, *, runtime_context: Any | None = None) -> list:
     """Get MCP server tools (auto-filtering disabled_tools).
 
     Unified entry point for Agents, automatically:
@@ -630,7 +746,12 @@ async def get_enabled_mcp_tools(server_slug: str) -> list:
         return []
 
     disabled_tools = config.get("disabled_tools") or []
-    return await get_mcp_tools(server_slug, additional_servers={server_slug: config}, disabled_tools=disabled_tools)
+    return await get_mcp_tools(
+        server_slug,
+        additional_servers={server_slug: config},
+        disabled_tools=disabled_tools,
+        runtime_context=runtime_context,
+    )
 
 
 async def get_servers_config(names: list[str]) -> dict[str, dict[str, Any]]:
@@ -645,7 +766,7 @@ async def get_servers_config(names: list[str]) -> dict[str, dict[str, Any]]:
     return await _load_enabled_mcp_server_configs(names=names)
 
 
-async def get_all_mcp_tools(server_slug: str) -> list:
+async def get_all_mcp_tools(server_slug: str, *, discovery_subject_uid: str | None = None) -> list:
     """Get all tools of an MCP server (no filtering).
 
     For management UI to display tool list, supports viewing all tools and their enabled status.
@@ -662,6 +783,10 @@ async def get_all_mcp_tools(server_slug: str) -> list:
         logger.warning(f"MCP server '{server_slug}' not found in database or disabled")
         return []
 
+    invocation_context = None
+    if is_enterprise_mcp_server(server_slug):
+        invocation_context = McpInvocationContext.for_discovery(str(discovery_subject_uid or ""))
+
     # Get all tools (no filtering, force refresh, no cache update)
     return await get_mcp_tools(
         server_slug,
@@ -669,4 +794,5 @@ async def get_all_mcp_tools(server_slug: str) -> list:
         disabled_tools=[],
         cache=False,
         force_refresh=True,
+        invocation_context=invocation_context,
     )

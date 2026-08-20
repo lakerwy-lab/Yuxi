@@ -34,8 +34,25 @@ x-api-worker-env: &api-worker-env
   TASKER_DEFAULT_TIMEOUT_SECONDS: ${TASKER_DEFAULT_TIMEOUT_SECONDS:-21600}
   NO_PROXY: localhost,127.0.0.1,milvus,graph,minio,milvus-etcd,etcd,mineru,paddlex,sandbox-provisioner,api.siliconflow.cn
   no_proxy: localhost,127.0.0.1,milvus,graph,minio,milvus-etcd,etcd,mineru,paddlex,sandbox-provisioner,api.siliconflow.cn
+  YUXI_ENTERPRISE_MCP_URL: ${YUXI_ENTERPRISE_MCP_URL:-http://enterprise-mcp:8010/mcp/meeting}
+  YUXI_HR_MCP_URL: ${YUXI_HR_MCP_URL:-http://enterprise-mcp:8010/mcp/hr}
+  YUXI_MCP_SIGNING_PRIVATE_KEY_FILE: /run/yuxi-mcp/private/private.pem
 
 services:
+  mcp-keygen:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    image: yuxi-api:${YUXI_VERSION:-0.7.1}
+    container_name: mcp-keygen-prod
+    working_dir: /app
+    volumes:
+      - ./docker/volumes/yuxi/mcp:/run/yuxi-mcp
+    networks:
+      - app-network
+    command: uv run --no-sync --no-dev python -m yuxi.mcp.keygen /run/yuxi-mcp
+    restart: "no"
+
   api:
     build:
       context: .
@@ -51,6 +68,7 @@ services:
       - ./backend/scripts:/app/scripts
       - /var/run/docker.sock:/var/run/docker.sock
       - ./docker/sandbox_provisioner:/app/docker/sandbox_provisioner:ro
+      - ./docker/volumes/yuxi/mcp:/run/yuxi-mcp:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
     env_file:
@@ -106,6 +124,43 @@ services:
       api:
         condition: service_healthy
 
+  enterprise-mcp:
+    build:
+      context: .
+      dockerfile: docker/enterprise-mcp.Dockerfile
+    image: yuxi-enterprise-mcp:${YUXI_VERSION:-0.7.1}
+    container_name: enterprise-mcp-prod
+    working_dir: /app/services/enterprise-mcp
+    networks:
+      - app-network
+    volumes:
+      - ./docker/volumes/yuxi/mcp/public:/run/yuxi-mcp/public:ro
+    env_file:
+      - .env
+    environment:
+      RUNNING_IN_DOCKER: "true"
+      YUXI_ENV: production
+      POSTGRES_URL: ${POSTGRES_URL:-postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-yuxi}}
+      YUXI_MCP_SIGNING_PRIVATE_KEY_B64: ""
+      YUXI_MCP_SIGNING_PUBLIC_KEY_B64: ""
+      YUXI_MCP_SIGNING_PUBLIC_KEY_FILE: /run/yuxi-mcp/public/public.pem
+      YUXI_ENTERPRISE_MCP_PUBLIC_URL: ${YUXI_ENTERPRISE_MCP_PUBLIC_URL:-http://enterprise-mcp:8010}
+      YUXI_MCP_ISSUER_URL: ${YUXI_MCP_ISSUER_URL:-http://api:5050}
+      HR_API_BASE_URL: ${HR_API_BASE_URL:-http://10.100.129.7:8080/api}
+    command: uv run --frozen --no-sync uvicorn enterprise_mcp.app:app --host 0.0.0.0 --port 8010
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8010/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+    depends_on:
+      mcp-keygen:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+
   worker:
     build:
       context: .
@@ -120,6 +175,7 @@ services:
       - ./docker/volumes/models:/app/models
       - /var/run/docker.sock:/var/run/docker.sock
       - ./docker/sandbox_provisioner:/app/docker/sandbox_provisioner:ro
+      - ./docker/volumes/yuxi/mcp:/run/yuxi-mcp:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
     env_file:
@@ -129,6 +185,8 @@ services:
     command: uv run --no-sync --no-dev arq server.worker_main.WorkerSettings
     restart: unless-stopped
     depends_on:
+      mcp-keygen:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:

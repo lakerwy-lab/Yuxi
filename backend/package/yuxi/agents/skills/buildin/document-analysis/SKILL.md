@@ -1,7 +1,7 @@
 ---
 name: document-analysis
 slug: document-analysis
-description: "复用 Yuxi OCR/文档解析链路，将 PDF、Office 和图片附件提取为 Markdown。"
+description: "复用 Xinbo OCR/文档解析链路，将 PDF、Office 和图片附件提取为 Markdown。"
 ---
 
 # 文档与图片分析

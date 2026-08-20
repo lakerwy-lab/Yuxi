@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from datetime import timedelta
 
 import pytest
@@ -26,7 +27,7 @@ class FakeMeetingClient:
         self.reserve_should_fail = reserve_should_fail
 
     async def list_meeting_rooms(self, union_id: str, *, max_results: int = 100):
-        return [{"roomId": "room-1", "roomName": "A 会议室"}]
+        return [{"roomId": "room-1", "roomName": "A 会议室", "roomCapacity": 8}]
 
     async def query_room_availability(self, union_id, room_ids, start_time, end_time):
         self.calls.append(("availability", room_ids))
@@ -47,6 +48,35 @@ class FakeMeetingClient:
 
     async def delete_schedule(self, union_id, calendar_id, event_id):
         self.calls.append(("delete_schedule", event_id))
+
+
+class _EmptyScalarResult:
+    def scalar_one_or_none(self):
+        return None
+
+
+class _HideFirstBookingLookupSession:
+    """模拟两个进程同时通过幂等键前置查询，随后由唯一约束裁决。"""
+
+    def __init__(self, session):
+        self.session = session
+        self.hidden = False
+
+    async def execute(self, statement):
+        statement_text = str(statement)
+        if not self.hidden and "room_bookings.idempotency_key" in statement_text:
+            self.hidden = True
+            return _EmptyScalarResult()
+        return await self.session.execute(statement)
+
+    def add(self, value):
+        self.session.add(value)
+
+    async def commit(self):
+        await self.session.commit()
+
+    async def rollback(self):
+        await self.session.rollback()
 
 
 @pytest_asyncio.fixture
@@ -129,3 +159,41 @@ async def test_booking_deletes_schedule_when_room_reservation_fails(session):
     assert ("delete_schedule", "event-1") in client.calls
     record = await session.scalar(select(RoomBooking).where(RoomBooking.status == "FAILED"))
     assert record is not None
+
+
+async def test_concurrent_confirm_unique_conflict_does_not_call_dingtalk(session):
+    client = FakeMeetingClient()
+    service = MeetingRoomService(session, client)
+    start_time, end_time = future_range()
+    preview = await service.preview_booking(
+        uid="user-1",
+        union_id="union-1",
+        room_id="room-1",
+        room_name="A 会议室",
+        title="项目评审",
+        start_time=start_time,
+        end_time=end_time,
+    )
+    idem = hashlib.sha256(f"user-1:{preview['confirm_token']}".encode()).hexdigest()
+    session.add(
+        RoomBooking(
+            id="existing-booking",
+            uid="user-1",
+            union_id="union-1",
+            room_id="room-1",
+            room_name="A 会议室",
+            title="项目评审",
+            start_time=start_time,
+            end_time=end_time,
+            status="CREATING",
+            idempotency_key=idem,
+        )
+    )
+    await session.commit()
+
+    racing_service = MeetingRoomService(_HideFirstBookingLookupSession(session), client)
+    with pytest.raises(DingTalkMeetingError) as exc_info:
+        await racing_service.confirm_booking("user-1", preview["confirm_token"])
+
+    assert exc_info.value.code == "BOOKING_IN_PROGRESS"
+    assert not [call for call in client.calls if call[0] == "schedule"]

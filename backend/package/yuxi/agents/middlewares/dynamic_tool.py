@@ -26,12 +26,12 @@ class DynamicToolMiddleware(AgentMiddleware):
         self._all_mcp_tools: dict[str, list[Any]] = {}  # 所有已加载的 MCP 工具
         self._mcp_servers = mcp_servers or []
 
-    async def initialize_mcp_tools(self) -> None:
+    async def initialize_mcp_tools(self, runtime_context=None) -> None:
         """异步初始化：预加载所有可能用到的 MCP 工具"""
         for mcp_name in self._mcp_servers:
             if mcp_name not in self._all_mcp_tools:
                 logger.info(f"Pre-loading MCP tools from: {mcp_name}")
-                mcp_tools = await get_mcp_tools(mcp_name)
+                mcp_tools = await get_mcp_tools(mcp_name, runtime_context=runtime_context)
                 self._all_mcp_tools[mcp_name] = mcp_tools
                 # 将 MCP 工具注册到 middleware.tools
                 self.tools.extend(mcp_tools)

@@ -85,6 +85,7 @@ async def receive_channel_message(
         uid=str(current_user.uid),
         channel=channel,
         account_id=account_id,
+        agent_slug=agent_slug,
         chat_id=payload.chat_id,
         requested_thread_id=payload.thread_id,
     )
@@ -355,15 +356,16 @@ def _resolve_thread_id(
     uid: str,
     channel: str,
     account_id: str,
+    agent_slug: str,
     chat_id: str | None,
     requested_thread_id: str | None,
 ) -> str:
-    """根据显式 thread 或通道会话信息解析稳定 Yuxi Thread ID。"""
+    """按用户、通道会话和智能体解析稳定的 Thread ID。"""
     if requested_thread_id and requested_thread_id.strip():
         return requested_thread_id.strip()
     if not chat_id or not chat_id.strip():
         raise HTTPException(status_code=422, detail="thread_id 或 chat_id 至少提供一个")
-    return hash_id("channel_", f"{uid}:{channel}:{account_id}:{chat_id.strip()}", length=64)
+    return hash_id("channel_", f"{uid}:{channel}:{account_id}:{agent_slug}:{chat_id.strip()}", length=64)
 
 
 def _normalize_required(value: str | None, field_name: str) -> str:

@@ -67,8 +67,15 @@ async def test_ensure_builtin_mcp_servers_removes_retired_system_server(monkeypa
 
     retired = await mcp_session.scalar(select(MCPServer).where(MCPServer.slug == "sequentialthinking"))
     chart = await mcp_session.scalar(select(MCPServer).where(MCPServer.slug == "mcp-server-chart"))
+    meeting = await mcp_session.scalar(select(MCPServer).where(MCPServer.slug == "meeting"))
+    hr = await mcp_session.scalar(select(MCPServer).where(MCPServer.slug == "hr"))
     assert retired is None
     assert chart is not None
+    assert meeting is not None
+    assert meeting.enabled == 1
+    assert hr is not None
+    assert hr.name == "HR 考勤查询"
+    assert hr.enabled == 1
 
 
 async def test_ensure_builtin_mcp_servers_preserves_user_server_with_retired_slug(monkeypatch, mcp_session):
@@ -293,6 +300,18 @@ async def test_get_enabled_mcp_tools_loads_latest_config_from_db(monkeypatch):
             "disabled_tools": ["tool_b"],
         }
     ]
+
+
+async def test_enterprise_mcp_tool_discovery_requires_trusted_context(monkeypatch):
+    async def fake_get_enabled_mcp_server_config(server_name: str, db=None):
+        del db
+        assert server_name == "meeting"
+        return {"transport": "streamable_http", "url": "http://enterprise-mcp/mcp/meeting"}
+
+    monkeypatch.setattr(mcp_service, "get_enabled_mcp_server_config", fake_get_enabled_mcp_server_config)
+
+    with pytest.raises(PermissionError, match="可信调用上下文"):
+        await mcp_service.get_mcp_tools("meeting")
 
 
 async def test_get_mcp_tools_rebuilds_cache_when_config_hash_changes(monkeypatch):

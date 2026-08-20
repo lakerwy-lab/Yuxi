@@ -45,8 +45,8 @@ BUILTIN_SKILLS: list[BuiltinSkillSpec] = [
     BuiltinSkillSpec(
         slug="knowledge-base",
         source_dir=_SKILLS_ROOT / "knowledge-base",
-        description="使用 Yuxi 知识库进行检索、打开文档、文档内定位和查看思维导图。",
-        version="2026.06.24",
+        description="使用 Xinbo 知识库进行检索、打开文档、文档内定位和查看思维导图。",
+        version="2026.08.20",
         tool_dependencies=(
             "list_kbs",
             "query_kb",
@@ -81,8 +81,8 @@ BUILTIN_SKILLS: list[BuiltinSkillSpec] = [
     BuiltinSkillSpec(
         slug="document-analysis",
         source_dir=_SKILLS_ROOT / "document-analysis",
-        description="复用 Yuxi OCR/文档解析链路，将 PDF、Office 和图片附件提取为 Markdown。",
-        version="2026.08.11",
+        description="复用 Xinbo OCR/文档解析链路，将 PDF、Office 和图片附件提取为 Markdown。",
+        version="2026.08.20",
         tool_dependencies=("ocr_parse_file", "present_artifacts"),
     ),
     BuiltinSkillSpec(

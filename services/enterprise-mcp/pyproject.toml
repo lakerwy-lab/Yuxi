@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=80", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "yuxi-enterprise-mcp"
+version = "0.1.0"
+description = "Yuxi 企业业务 MCP 服务"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    "fastapi>=0.121",
+    "mcp==1.27.2",
+    "uvicorn[standard]>=0.34",
+    "yuxi",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["enterprise_mcp*"]
+
+[tool.uv.sources]
+yuxi = { path = "../../backend/package", editable = true }
+
+[dependency-groups]
+test = [
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.ruff]
+line-length = 120
+lint.select = ["F", "E", "W", "UP"]
+
+[[tool.uv.index]]
+name = "tsinghua"
+url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+default = true

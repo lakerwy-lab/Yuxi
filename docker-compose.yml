@@ -36,8 +36,26 @@ x-api-worker-env: &api-worker-env
   # 其他环境变量
   NO_PROXY: localhost,127.0.0.1,milvus,graph,minio,milvus-etcd-dev,etcd,mineru,paddlex,sandbox-provisioner,api.siliconflow.cn
   no_proxy: localhost,127.0.0.1,milvus,graph,minio,milvus-etcd-dev,etcd,mineru,paddlex,sandbox-provisioner,api.siliconflow.cn
+  YUXI_ENTERPRISE_MCP_URL: ${YUXI_ENTERPRISE_MCP_URL:-http://enterprise-mcp:8010/mcp/meeting}
+  YUXI_HR_MCP_URL: ${YUXI_HR_MCP_URL:-http://enterprise-mcp:8010/mcp/hr}
+  YUXI_MCP_SIGNING_PRIVATE_KEY_FILE: /run/yuxi-mcp/private/private.pem
 
 services:
+  mcp-keygen:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    image: yuxi-api:${YUXI_VERSION:-0.7.1}
+    container_name: mcp-keygen-dev
+    working_dir: /app
+    volumes:
+      - ./backend/package:/app/package:ro
+      - ./docker/volumes/yuxi/mcp:/run/yuxi-mcp
+    networks:
+      - app-network
+    command: uv run --no-sync --no-dev python -m yuxi.mcp.keygen /run/yuxi-mcp
+    restart: "no"
+
   api:
     build:
       context: .
@@ -53,6 +71,7 @@ services:
       - ./backend/test:/app/test
       - ./backend/scripts:/app/scripts
       - ./docker/sandbox_provisioner:/app/docker/sandbox_provisioner:ro
+      - ./docker/volumes/yuxi/mcp:/run/yuxi-mcp:ro
       - ./.env.local:/app/.env
       - /var/run/docker.sock:/var/run/docker.sock
       - nltk_data:/root/nltk_data  # 使用命名卷持久化NLTK数据，避免路径展开差异
@@ -117,6 +136,48 @@ services:
       api:
         condition: service_healthy
 
+  enterprise-mcp:
+    build:
+      context: .
+      dockerfile: docker/enterprise-mcp.Dockerfile
+    image: yuxi-enterprise-mcp:${YUXI_VERSION:-0.7.1}
+    container_name: enterprise-mcp-dev
+    working_dir: /app/services/enterprise-mcp
+    volumes:
+      - ./services/enterprise-mcp/src:/app/services/enterprise-mcp/src
+      - ./services/enterprise-mcp/tests:/app/services/enterprise-mcp/tests
+      - ./backend/package:/app/backend/package
+      - ./docker/volumes/yuxi/mcp/public:/run/yuxi-mcp/public:ro
+    ports:
+      - "127.0.0.1:18010:8010"
+    networks:
+      - app-network
+    env_file:
+      - .env.local
+    environment:
+      RUNNING_IN_DOCKER: "true"
+      YUXI_ENV: development
+      POSTGRES_URL: ${POSTGRES_URL:-postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-yuxi}}
+      YUXI_MCP_SIGNING_PRIVATE_KEY_B64: ""
+      YUXI_MCP_SIGNING_PUBLIC_KEY_B64: ""
+      YUXI_MCP_SIGNING_PUBLIC_KEY_FILE: /run/yuxi-mcp/public/public.pem
+      YUXI_ENTERPRISE_MCP_PUBLIC_URL: ${YUXI_ENTERPRISE_MCP_PUBLIC_URL:-http://enterprise-mcp:8010}
+      YUXI_MCP_ISSUER_URL: ${YUXI_MCP_ISSUER_URL:-http://api:5050}
+      HR_API_BASE_URL: ${HR_API_BASE_URL:-http://10.100.129.7:8080/api}
+    command: uv run --frozen --no-sync uvicorn enterprise_mcp.app:app --host 0.0.0.0 --port 8010 --reload --reload-dir src --reload-dir /app/backend/package
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8010/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+    depends_on:
+      mcp-keygen:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+
   worker:
     build:
       context: .
@@ -135,6 +196,7 @@ services:
       - ./.env.local:/app/.env
       - ./backend/pyproject.toml:/app/pyproject.toml
       - ./backend/uv.lock:/app/uv.lock
+      - ./docker/volumes/yuxi/mcp:/run/yuxi-mcp:ro
       - /var/run/docker.sock:/var/run/docker.sock
     networks:
       - app-network
@@ -147,6 +209,8 @@ services:
     command: watchfiles --filter python "arq server.worker_main.WorkerSettings" /app/server /app/package
     restart: unless-stopped
     depends_on:
+      mcp-keygen:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:

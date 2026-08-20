@@ -33,6 +33,24 @@ def test_channel_rejects_overlong_channel_at_schema_boundary():
         _payload("你好", channel="x" * 33)
 
 
+def test_channel_thread_id_is_scoped_by_agent():
+    """同一外部会话切换智能体时必须创建独立线程。"""
+
+    base = {
+        "uid": "user-1",
+        "channel": "dingtalk_bot",
+        "account_id": "robot-1",
+        "chat_id": "corp-1:direct:staff-1",
+        "requested_thread_id": None,
+    }
+
+    default_thread = router._resolve_thread_id(agent_slug="default-chatbot", **base)
+    hr_thread = router._resolve_thread_id(agent_slug="agent-202608190949", **base)
+
+    assert default_thread != hr_thread
+    assert hr_thread == router._resolve_thread_id(agent_slug="agent-202608190949", **base)
+
+
 @pytest.mark.asyncio
 async def test_plain_channel_text_uses_shared_submission(monkeypatch: pytest.MonkeyPatch):
     calls: dict[str, object] = {}

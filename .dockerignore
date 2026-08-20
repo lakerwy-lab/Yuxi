@@ -17,6 +17,7 @@ venv/
 env/
 backend/.venv/
 backend/package/.venv/
+**/.venv/
 
 # 忽略 node_modules 文件夹（前端项目）
 web/node_modules/

@@ -13,6 +13,7 @@ WORKDIR /app
 ENV TZ=Asia/Shanghai \
     UV_PROJECT_ENVIRONMENT="/usr/local" \
     UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
     DEBIAN_FRONTEND=noninteractive
 
 # 设置 npm 镜像源，为 MCP 和 Skills 安装依赖
@@ -48,11 +49,17 @@ COPY backend/pyproject.toml /app/pyproject.toml
 COPY backend/.python-version /app/.python-version
 COPY backend/uv.lock /app/uv.lock
 
-# 先复制 package 目录，因为 pyproject.toml 中 yuxi = { path = "package", editable = true }
-COPY backend/package /app/package
+# 第三方依赖只由 pyproject.toml 和 uv.lock 决定，并复用 BuildKit 下载缓存。
+# 业务源码变化时该层保持命中，不再重新下载 Torch、OpenCV 等大型依赖。
+RUN --mount=type=cache,id=yuxi-uv-cache,target=/root/.cache/uv,sharing=locked \
+    uv sync --group test --no-dev --frozen --no-install-local \
+    --index-url https://pypi.tuna.tsinghua.edu.cn/simple
 
-# 如果网络还是不好，可以在后面添加 --index-url https://pypi.tuna.tsinghua.edu.cn/simple
-RUN uv sync --no-cache --group test --no-dev --frozen --index-url https://pypi.tuna.tsinghua.edu.cn/simple
+# 源码复制后仅安装本地 yuxi 包；第三方依赖已在上一层完成。
+COPY backend/package /app/package
+RUN --mount=type=cache,id=yuxi-uv-cache,target=/root/.cache/uv,sharing=locked \
+    uv sync --group test --no-dev --frozen \
+    --index-url https://pypi.tuna.tsinghua.edu.cn/simple
 
 # 复制 server 代码
 COPY backend/server /app/server
