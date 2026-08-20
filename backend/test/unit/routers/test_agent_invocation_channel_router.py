@@ -336,6 +336,11 @@ async def test_dingtalk_delivery_resolves_user_and_uses_server_agent(monkeypatch
         return {"kind": "run", "run_id": "run-1", "status": "dispatched"}
 
     monkeypatch.setattr(router, "dingtalk_bot_opts", BotOptions())
+    monkeypatch.setattr(
+        router,
+        "load_dingtalk_bot_accounts",
+        lambda **_kwargs: (SimpleNamespace(robot_code="robot-1", agent_slug="it-agent"),),
+    )
     monkeypatch.setattr(router, "UserRepository", Users)
     monkeypatch.setattr(router, "receive_channel_message", fake_receive)
 
@@ -376,6 +381,11 @@ async def test_dingtalk_delivery_rejects_unbound_user(monkeypatch: pytest.Monkey
             return None
 
     monkeypatch.setattr(router, "dingtalk_bot_opts", BotOptions())
+    monkeypatch.setattr(
+        router,
+        "load_dingtalk_bot_accounts",
+        lambda **_kwargs: (SimpleNamespace(robot_code="robot-1", agent_slug="it-agent"),),
+    )
     monkeypatch.setattr(router, "UserRepository", Users)
 
     with pytest.raises(HTTPException) as exc:
@@ -395,6 +405,192 @@ async def test_dingtalk_delivery_rejects_unbound_user(monkeypatch: pytest.Monkey
 
     assert exc.value.status_code == 403
     assert exc.value.detail == "未在平台绑定钉钉身份"
+
+
+@pytest.mark.asyncio
+async def test_dingtalk_delivery_maps_each_robot_to_its_server_agent(monkeypatch: pytest.MonkeyPatch):
+    """多机器人投递只能命中 RobotCode 对应的服务端 Agent。"""
+
+    class BotOptions:
+        async def get(self, _db):
+            return {"enabled": True, "session_reset_mode": "none"}
+
+    class Users:
+        async def get_by_dingtalk_identity_with_db(self, *_args, **_kwargs):
+            return SimpleNamespace(uid="user-1", department_id=3)
+
+    received = []
+
+    async def fake_receive(payload, *, current_user, db):
+        del current_user, db
+        received.append(payload)
+        return {"kind": "run", "run_id": f"run-{len(received)}", "status": "dispatched"}
+
+    accounts = (
+        SimpleNamespace(robot_code="general-robot", agent_slug="default-chatbot"),
+        SimpleNamespace(robot_code="hr-robot", agent_slug="agent-hr"),
+    )
+    monkeypatch.setattr(router, "dingtalk_bot_opts", BotOptions())
+    monkeypatch.setattr(router, "load_dingtalk_bot_accounts", lambda **_kwargs: accounts)
+    monkeypatch.setattr(router, "UserRepository", Users)
+    monkeypatch.setattr(router, "receive_channel_message", fake_receive)
+
+    for account_id in ("general-robot", "hr-robot"):
+        await router.receive_channel_delivery(
+            router.ChannelDeliveryRequest(
+                account_id=account_id,
+                tenant_id="corp-1",
+                chat_id="staff-1",
+                chat_type="direct",
+                sender_id="staff-1",
+                message_id=f"message-{account_id}",
+                message={"type": "text", "text": "你好"},
+            ),
+            _gateway=None,
+            db=object(),
+        )
+
+    assert [(payload.account_id, payload.agent_slug) for payload in received] == [
+        ("general-robot", "default-chatbot"),
+        ("hr-robot", "agent-hr"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_dingtalk_delivery_rejects_unknown_robot(monkeypatch: pytest.MonkeyPatch):
+    class BotOptions:
+        async def get(self, _db):
+            return {"enabled": True}
+
+    monkeypatch.setattr(router, "dingtalk_bot_opts", BotOptions())
+    monkeypatch.setattr(
+        router,
+        "load_dingtalk_bot_accounts",
+        lambda **_kwargs: (SimpleNamespace(robot_code="known-robot", agent_slug="agent-1"),),
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await router.receive_channel_delivery(
+            router.ChannelDeliveryRequest(
+                account_id="unknown-robot",
+                tenant_id="corp-1",
+                chat_id="staff-1",
+                chat_type="direct",
+                sender_id="staff-1",
+                message_id="message-1",
+                message={"type": "text", "text": "你好"},
+            ),
+            _gateway=None,
+            db=object(),
+        )
+
+    assert exc.value.status_code == 403
+    assert exc.value.detail == "钉钉机器人账号不匹配"
+
+
+@pytest.mark.asyncio
+async def test_dingtalk_idle_session_passes_memory_thread_to_submission(monkeypatch: pytest.MonkeyPatch):
+    class BotOptions:
+        async def get(self, _db):
+            return {"enabled": True, "session_reset_mode": "idle", "session_idle_minutes": "30"}
+
+    class Users:
+        async def get_by_dingtalk_identity_with_db(self, *_args, **_kwargs):
+            return SimpleNamespace(uid="user-1", department_id=3)
+
+    class SessionRegistry:
+        async def resolve_thread_id(self, key, *, idle_seconds):
+            assert key.uid == "user-1"
+            assert key.account_id == "hr-robot"
+            assert key.agent_slug == "agent-hr"
+            assert key.tenant_id == "corp-1"
+            assert key.chat_type == "group"
+            assert key.chat_id == "conversation-1"
+            assert idle_seconds == 1800
+            return "channel_idle_thread"
+
+    calls: dict[str, object] = {}
+
+    async def fake_receive(payload, *, current_user, db):
+        del current_user, db
+        calls["payload"] = payload
+        return {"kind": "run", "run_id": "run-1", "status": "dispatched"}
+
+    monkeypatch.setattr(router, "dingtalk_bot_opts", BotOptions())
+    monkeypatch.setattr(
+        router,
+        "load_dingtalk_bot_accounts",
+        lambda **_kwargs: (SimpleNamespace(robot_code="hr-robot", agent_slug="agent-hr"),),
+    )
+    monkeypatch.setattr(router, "UserRepository", Users)
+    monkeypatch.setattr(router, "channel_session_registry", SessionRegistry())
+    monkeypatch.setattr(router, "receive_channel_message", fake_receive)
+
+    await router.receive_channel_delivery(
+        router.ChannelDeliveryRequest(
+            account_id="hr-robot",
+            tenant_id="corp-1",
+            chat_id="conversation-1",
+            chat_type="group",
+            sender_id="staff-1",
+            message_id="message-1",
+            message={"type": "text", "text": "查考勤"},
+        ),
+        _gateway=None,
+        db=object(),
+    )
+
+    assert calls["payload"].thread_id == "channel_idle_thread"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("mode", "minutes", "expected_detail"),
+    [
+        ("daily", "30", "钉钉机器人会话重置模式无效"),
+        ("idle", "abc", "钉钉机器人空闲分钟数无效"),
+        ("idle", "0", "钉钉机器人空闲分钟数必须在 1 至 10080 之间"),
+        ("idle", "10081", "钉钉机器人空闲分钟数必须在 1 至 10080 之间"),
+    ],
+)
+async def test_dingtalk_delivery_rejects_invalid_session_policy(
+    monkeypatch: pytest.MonkeyPatch,
+    mode: str,
+    minutes: str,
+    expected_detail: str,
+):
+    class BotOptions:
+        async def get(self, _db):
+            return {
+                "enabled": True,
+                "session_reset_mode": mode,
+                "session_idle_minutes": minutes,
+            }
+
+    monkeypatch.setattr(router, "dingtalk_bot_opts", BotOptions())
+    monkeypatch.setattr(
+        router,
+        "load_dingtalk_bot_accounts",
+        lambda **_kwargs: (SimpleNamespace(robot_code="robot-1", agent_slug="agent-1"),),
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await router.receive_channel_delivery(
+            router.ChannelDeliveryRequest(
+                account_id="robot-1",
+                tenant_id="corp-1",
+                chat_id="staff-1",
+                chat_type="direct",
+                sender_id="staff-1",
+                message_id="message-1",
+                message={"type": "text", "text": "你好"},
+            ),
+            _gateway=None,
+            db=object(),
+        )
+
+    assert exc.value.status_code == 503
+    assert exc.value.detail == expected_detail
 
 
 @pytest.mark.asyncio

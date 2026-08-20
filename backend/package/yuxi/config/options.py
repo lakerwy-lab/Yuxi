@@ -126,7 +126,7 @@ paddleocr_api_opts = Option(
 dingtalk_bot_opts = Option(
     key="dingtalk_bot_opts",
     name="钉钉机器人",
-    description="配置独立钉钉 Channel 的启用状态、绑定智能体和 Robot Code。",
+    description="配置独立钉钉 Channel 的启用状态与全局会话策略。多机器人账号由部署环境变量维护。",
     params={
         "fields": [
             {
@@ -143,7 +143,7 @@ dingtalk_bot_opts = Option(
                 "type": "text",
                 "environment": "DINGTALK_BOT_AGENT_SLUG",
                 "placeholder": "default-chatbot",
-                "help": "留空时读取 DINGTALK_BOT_AGENT_SLUG，默认 default-chatbot。",
+                "help": "仅兼容单机器人模式；多机器人模式读取 DINGTALK_BOTS_JSON 中的 agent_slug。",
             },
             {
                 "key": "robot_code",
@@ -151,7 +151,23 @@ dingtalk_bot_opts = Option(
                 "type": "password",
                 "environment": "DINGTALK_ROBOT_CODE",
                 "sensitive": True,
-                "help": "留空时读取 DINGTALK_ROBOT_CODE，通常等于 client_id。",
+                "help": "仅兼容单机器人模式；多机器人模式默认使用每项 client_id。",
+            },
+            {
+                "key": "session_reset_mode",
+                "label": "会话重置模式",
+                "type": "text",
+                "environment": "DINGTALK_BOT_SESSION_RESET_MODE",
+                "placeholder": "none / idle",
+                "help": "none 持续复用线程；idle 在用户空闲达到阈值后创建新线程。",
+            },
+            {
+                "key": "session_idle_minutes",
+                "label": "空闲分钟数",
+                "type": "text",
+                "environment": "DINGTALK_BOT_SESSION_IDLE_MINUTES",
+                "placeholder": "30",
+                "help": "idle 模式生效，允许 1 至 10080 分钟。",
             },
         ]
     },

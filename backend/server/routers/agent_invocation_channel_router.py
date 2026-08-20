@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import StreamingResponse
+from yuxi.channels.dingtalk.config import load_dingtalk_bot_accounts
 from yuxi.config.options import dingtalk_bot_opts
 from yuxi.repositories.agent_run_repository import AgentRunRepository
 from yuxi.repositories.user_repository import UserRepository
@@ -24,6 +25,7 @@ from yuxi.services.agent_run_service import (
     stream_agent_run_events,
 )
 from yuxi.services.channel_command_service import parse_slash_command
+from yuxi.services.channel_session_service import ChannelSessionKey, channel_session_registry
 from yuxi.services.chat_service import get_agent_state_view
 from yuxi.services.input_message_service import build_chat_input_message
 from yuxi.services.run_submission_service import RunOrigin, RunSubmissionCommand, submit_run_command
@@ -198,9 +200,18 @@ async def receive_channel_delivery(
     if not _option_enabled(enabled_value):
         raise HTTPException(status_code=503, detail="钉钉机器人未启用")
 
-    configured_account = str(config.get("robot_code") or "").strip()
-    if configured_account and configured_account != payload.account_id:
+    try:
+        accounts = load_dingtalk_bot_accounts(
+            legacy_agent_slug=str(config.get("agent_slug") or "").strip() or None,
+            legacy_robot_code=str(config.get("robot_code") or "").strip() or None,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=503, detail="钉钉机器人配置无效") from exc
+
+    account = next((item for item in accounts if item.robot_code == payload.account_id), None)
+    if account is None:
         raise HTTPException(status_code=403, detail="钉钉机器人账号不匹配")
+    session_mode, idle_seconds = _resolve_dingtalk_session_policy(config)
 
     user = await UserRepository().get_by_dingtalk_identity_with_db(
         db,
@@ -213,13 +224,28 @@ async def receive_channel_delivery(
     if not user.department_id:
         raise HTTPException(status_code=400, detail="当前用户未绑定部门")
 
-    agent_slug = str(config.get("agent_slug") or "default-chatbot").strip() or "default-chatbot"
+    agent_slug = account.agent_slug
     scoped_chat_id = f"{payload.tenant_id}:{payload.chat_type}:{payload.chat_id}"
+    thread_id = None
+    if session_mode == "idle":
+        thread_id = await channel_session_registry.resolve_thread_id(
+            ChannelSessionKey(
+                uid=str(user.uid),
+                channel=payload.channel,
+                account_id=payload.account_id,
+                agent_slug=agent_slug,
+                tenant_id=payload.tenant_id,
+                chat_type=payload.chat_type,
+                chat_id=payload.chat_id,
+            ),
+            idle_seconds=idle_seconds,
+        )
     result = await receive_channel_message(
         ChannelMessageRequest(
             channel=payload.channel,
             account_id=payload.account_id,
             chat_id=scoped_chat_id,
+            thread_id=thread_id,
             sender_id=payload.sender_id or payload.sender_union_id,
             message_id=payload.message_id,
             agent_slug=agent_slug,
@@ -380,6 +406,27 @@ def _option_enabled(value: object) -> bool:
     """解析 options 中的布尔开关。"""
 
     return str(value or "").strip().lower() in {"true", "1", "yes", "on"}
+
+
+def _resolve_dingtalk_session_policy(config: dict[str, object]) -> tuple[str, int]:
+    """解析全局会话策略，配置错误时拒绝继续投递。"""
+
+    mode = (
+        str(config.get("session_reset_mode") or os.getenv("DINGTALK_BOT_SESSION_RESET_MODE") or "none").strip().lower()
+    )
+    if mode not in {"none", "idle"}:
+        raise HTTPException(status_code=503, detail="钉钉机器人会话重置模式无效")
+    if mode == "none":
+        return mode, 0
+
+    raw_minutes = config.get("session_idle_minutes") or os.getenv("DINGTALK_BOT_SESSION_IDLE_MINUTES") or "30"
+    try:
+        idle_minutes = int(str(raw_minutes).strip())
+    except ValueError as exc:
+        raise HTTPException(status_code=503, detail="钉钉机器人空闲分钟数无效") from exc
+    if not 1 <= idle_minutes <= 10080:
+        raise HTTPException(status_code=503, detail="钉钉机器人空闲分钟数必须在 1 至 10080 之间")
+    return mode, idle_minutes * 60
 
 
 async def _require_channel_run(

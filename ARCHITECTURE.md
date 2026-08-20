@@ -15,7 +15,7 @@ Yuxi 是一个面向 RAG、知识图谱和多智能体工作流的知识库平�
 - `web-dev`：Vue 3 / Vite 前端，挂载 `web/src` 并热重载。
 - `api-dev`：FastAPI API 服务，挂载 `backend/server`、`backend/package` 和测试目录并热重载。
 - `worker-dev`：ARQ worker，执行已经派发的 AgentRun，并负责异常恢复扫描。
-- `dingtalk-channel-dev`：独立维护钉钉 Stream 长连接，通过服务认证的 Delivery/Run HTTP 边界接入 Yuxi，并把正文增量写入 AI Card。
+- `dingtalk-channel-dev`：在一个进程内按机器人账号独立维护钉钉 Stream 长连接与 AI Card 客户端，通过服务认证的 Delivery/Run HTTP 边界接入 Yuxi；API 按 RobotCode 绑定 Agent，单账号连接故障不结束其他账号。
 - `mcp-keygen-dev`：普通 Compose 启动时一次性创建或校验持久化 Ed25519 密钥；API/worker 挂载私钥目录，enterprise-mcp 只能挂载公钥目录。
 - `enterprise-mcp-dev`：默认启动的单进程企业 MCP 网关；在 8010 同时发布 `/mcp/meeting` 与 `/mcp/hr`，各域独立校验 audience 和工具白名单，实际调用均要求 API/worker 按真实 AgentRun 与钉钉 userId 签发的短期令牌。新增同信任边界业务域默认注册子应用，不新增容器。
 - `sandbox-provisioner`：为智能体工具执行提供隔离沙盒。
@@ -95,7 +95,7 @@ Yuxi 是一个面向 RAG、知识图谱和多智能体工作流的知识库平�
 
 审批或人机输入产生的 resume 请求会从 LangGraph checkpoint 恢复，并创建新的 AgentRun；它不重新进入普通消息 FIFO 接入流程。
 
-钉钉消息由 `dingtalk-channel-dev` 快速 ACK，经服务凭证调用 `/api/agent-invocation/channel/deliveries`；API 负责映射真实用户、解析绑定 Agent 并提交 Run。Channel 只消费其账号作用域内的紧凑 Run SSE，终态通过 Result API 校准后完成 AI Card。FastAPI lifespan 不维护外部 IM 长连接。
+钉钉消息由 `dingtalk-channel-dev` 中对应机器人账号的 receiver 快速 ACK，经共享服务凭证调用 `/api/agent-invocation/channel/deliveries`；API 根据可信 RobotCode 映射固定 Agent、映射真实用户并提交 Run。各账号只消费自身作用域内的紧凑 Run SSE，终态通过 Result API 校准后完成 AI Card。`idle` 会话模式仅在 API 内存保存当前 thread 指针，Conversation、Message 与 AgentRun 仍以 PostgreSQL 为事实来源；FastAPI lifespan 不维护外部 IM 长连接。
 
 ## 架构不变量
 
